@@ -61,6 +61,14 @@ jobs:
           for CLASS in $(jar tf /tmp/opusencoder.jar | grep '\.class$' | grep -v '\$' | sed 's#/#.#g;s#\.class$##'); do
             javap -classpath /tmp/opusencoder.jar -p "$CLASS"
           done
+echo "=== COMPANION ==="
+javap -classpath /tmp/opusencoder.jar -p 'io.element.android.opusencoder.OggOpusEncoder$Companion'
+
+echo "=== FRECUENCIA 48 KHZ ==="
+javap -classpath /tmp/opusencoder.jar -p 'io.element.android.opusencoder.configuration.SampleRate$Rate48kHz'
+
+echo "=== FRECUENCIA 24 KHZ ==="
+javap -classpath /tmp/opusencoder.jar -p 'io.element.android.opusencoder.configuration.SampleRate$Rate24KHz'
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
