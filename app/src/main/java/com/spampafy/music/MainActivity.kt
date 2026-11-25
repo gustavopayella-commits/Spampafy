@@ -43,3 +43,31 @@ private var pendingUri: Uri? = null
         super.onDestroy()
     }
 }
+private fun connectToMusicService() {
+    val token = SessionToken(
+        this,
+        ComponentName(this, MusicService::class.java)
+    )
+
+    val future = MediaController.Builder(this, token)
+        .buildAsync()
+
+    controllerFuture = future
+
+    future.addListener({
+        try {
+            controller = future.get()
+
+            pendingUri?.let { uri ->
+                pendingUri = null
+                playMusic(uri)
+            }
+        } catch (e: Exception) {
+            Toast.makeText(
+                this,
+                "No se pudo conectar el reproductor",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }, ContextCompat.getMainExecutor(this))
+}
