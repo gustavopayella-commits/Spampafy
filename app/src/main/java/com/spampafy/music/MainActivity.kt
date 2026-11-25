@@ -2,6 +2,7 @@
 package com.spampafy.music
 
 import android.content.ComponentName
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
@@ -121,6 +122,12 @@ class MainActivity : AppCompatActivity() {
             }
 
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun openPlayerScreen() {
+        startActivity(
+            Intent(this, PlayerActivity::class.java)
+        )
     }
 
     private fun createInterface() {
@@ -452,7 +459,9 @@ class MainActivity : AppCompatActivity() {
             createMediaItem(Uri.fromFile(it))
         }
 
-        playQueue(items, startIndex)
+        if (playQueue(items, startIndex)) {
+            openPlayerScreen()
+        }
     }
 
     private fun playMusic(uri: Uri) {
@@ -480,15 +489,17 @@ class MainActivity : AppCompatActivity() {
             createMediaItem(it)
         }
 
-        playQueue(items, 0)
+        if (playQueue(items, 0)) {
+            openPlayerScreen()
+        }
     }
 
     private fun playQueue(
         items: List<MediaItem>,
         startIndex: Int
-    ) {
+    ): Boolean {
 
-        val musicPlayer = controller ?: return
+        val musicPlayer = controller ?: return false
 
         if (items.isEmpty()) {
             Toast.makeText(
@@ -496,10 +507,10 @@ class MainActivity : AppCompatActivity() {
                 "No hay canciones para reproducir",
                 Toast.LENGTH_SHORT
             ).show()
-            return
+            return false
         }
 
-        try {
+        return try {
 
             musicPlayer.setMediaItems(
                 items,
@@ -511,6 +522,7 @@ class MainActivity : AppCompatActivity() {
             musicPlayer.play()
 
             updatePlaybackButton()
+            true
 
         } catch (e: Exception) {
 
@@ -519,6 +531,8 @@ class MainActivity : AppCompatActivity() {
                 "No se pudo iniciar la lista",
                 Toast.LENGTH_LONG
             ).show()
+
+            false
         }
     }
 
