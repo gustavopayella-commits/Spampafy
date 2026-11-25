@@ -19,7 +19,7 @@ private var pendingUri: Uri? = null
     override fun onCreate() {
         super.onCreate()
 
-        player = ExoPlayer.Builder(this).build()
+        connectToMusicService()
 
         mediaSession = MediaSession.Builder(
             this,
