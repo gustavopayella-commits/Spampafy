@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import java.io.File
 import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
@@ -22,6 +23,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var playButton: Button
     private lateinit var conversionStatus: TextView
     private lateinit var qualitySpinner: Spinner
+    private lateinit var libraryContainer: LinearLayout
 
     private var selectedUri: Uri? = null
 
@@ -39,6 +41,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         player = ExoPlayer.Builder(this).build()
         createInterface()
+        refreshLibrary()
     }
 
     private fun createInterface() {
@@ -55,7 +58,6 @@ class MainActivity : AppCompatActivity() {
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
         }
-
         root.addView(logo, LinearLayout.LayoutParams(-1, 65))
 
         val subtitle = TextView(this).apply {
@@ -102,7 +104,7 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(playButton, LinearLayout.LayoutParams(-1, 55))
 
-        val libraryButton = Button(this).apply {
+        val addButton = Button(this).apply {
             text = "＋  AGREGAR MÚSICA"
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.rgb(35, 35, 49))
@@ -110,15 +112,9 @@ class MainActivity : AppCompatActivity() {
                 selectMusic.launch(arrayOf("audio/*"))
             }
         }
-        root.addView(libraryButton, LinearLayout.LayoutParams(-1, 50))
+        root.addView(addButton, LinearLayout.LayoutParams(-1, 50))
 
-        val separator = TextView(this).apply {
-            text = "━━━━━━━━━━━━━━━━━━━━"
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(109, 40, 217))
-            setPadding(0, 18, 0, 8)
-        }
-        root.addView(separator)
+        addSeparator(root)
 
         val converterTitle = TextView(this).apply {
             text = "CONVERTIR A OPUS"
@@ -149,9 +145,10 @@ class MainActivity : AppCompatActivity() {
             text = "CONVERTIR A OPUS"
             setTextColor(Color.WHITE)
             setBackgroundColor(Color.rgb(109, 40, 217))
-            setOnClickListener { convertSelectedMusic(this) }
+            setOnClickListener {
+                convertSelectedMusic(this)
+            }
         }
-
         root.addView(
             convertButton,
             LinearLayout.LayoutParams(-1, 55)
@@ -166,9 +163,175 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(conversionStatus)
 
+        addSeparator(root)
+
+        val libraryTitle = TextView(this).apply {
+            text = "MI BIBLIOTECA OPUS"
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(167, 139, 250))
+            setPadding(0, 5, 0, 12)
+        }
+        root.addView(libraryTitle)
+
+        libraryContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        root.addView(libraryContainer)
+
         val scroll = ScrollView(this)
         scroll.addView(root)
         setContentView(scroll)
+    }
+
+    private fun addSeparator(root: LinearLayout) {
+        val separator = TextView(this).apply {
+            text = "━━━━━━━━━━━━━━━━━━━━"
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(109, 40, 217))
+            setPadding(0, 18, 0, 8)
+        }
+        root.addView(separator)
+    }
+
+    private fun getOutputDirectory(): File {
+        return File(
+            getExternalFilesDir(null),
+            "Spampafy/Converted"
+        )
+    }
+
+    private fun refreshLibrary() {
+        if (!::libraryContainer.isInitialized) return
+
+        libraryContainer.removeAllViews()
+
+        val files = getOutputDirectory()
+            .listFiles()
+            ?.filter {
+                it.isFile && it.extension.equals(
+                    "opus",
+                    ignoreCase = true
+                )
+            }
+            ?.sortedByDescending { it.lastModified() }
+            ?: emptyList()
+
+        if (files.isEmpty()) {
+            val empty = TextView(this).apply {
+                text = "Todavía no tenés canciones convertidas"
+                textSize = 14f
+                setTextColor(Color.LTGRAY)
+                gravity = Gravity.CENTER
+                setPadding(0, 20, 0, 20)
+            }
+            libraryContainer.addView(empty)
+            return
+        }
+
+        files.forEach { file ->
+            addLibraryItem(file)
+        }
+    }
+
+    private fun addLibraryItem(file: File) {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 12, 14, 12)
+            setBackgroundColor(Color.rgb(32, 27, 49))
+        }
+
+        val name = TextView(this).apply {
+            text = "♫  ${file.nameWithoutExtension}"
+            textSize = 16f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+        }
+        card.addView(name)
+
+        val info = TextView(this).apply {
+            val quality = Regex("_([0-9]+)kbps$")
+                .find(file.nameWithoutExtension)
+                ?.groupValues
+                ?.get(1)
+
+            text = "Opus • ${quality ?: "Calidad desconocida"} kbps • ${formatSize(file.length())}"
+            textSize = 12f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, 5, 0, 8)
+        }
+        card.addView(info)
+
+        val buttons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val play = Button(this).apply {
+            text = "▶ REPRODUCIR"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(109, 40, 217))
+            setOnClickListener {
+                playMusic(Uri.fromFile(file))
+            }
+        }
+
+        val delete = Button(this).apply {
+            text = "ELIMINAR"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(130, 35, 55))
+            setOnClickListener {
+                confirmDelete(file)
+            }
+        }
+
+        buttons.addView(
+            play,
+            LinearLayout.LayoutParams(0, 48, 1f)
+        )
+
+        buttons.addView(
+            delete,
+            LinearLayout.LayoutParams(0, 48, 1f)
+        )
+
+        card.addView(buttons)
+
+        val params = LinearLayout.LayoutParams(-1, -2)
+        params.bottomMargin = 12
+        libraryContainer.addView(card, params)
+    }
+
+    private fun formatSize(bytes: Long): String {
+        return if (bytes < 1024 * 1024) {
+            String.format("%.1f KB", bytes / 1024.0)
+        } else {
+            String.format("%.2f MB", bytes / (1024.0 * 1024.0))
+        }
+    }
+
+    private fun confirmDelete(file: File) {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Eliminar canción")
+            .setMessage("¿Querés eliminar ${file.name}?")
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Eliminar") { _, _ ->
+                if (file.delete()) {
+                    refreshLibrary()
+                    Toast.makeText(
+                        this,
+                        "Canción eliminada",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    Toast.makeText(
+                        this,
+                        "No se pudo eliminar el archivo",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+            .show()
     }
 
     private fun convertSelectedMusic(button: Button) {
@@ -203,18 +366,23 @@ class MainActivity : AppCompatActivity() {
 
                 runOnUiThread {
                     conversionStatus.text =
-                        "¡Conversión terminada!\n${output.absolutePath}"
+                        "¡Conversión terminada!\n${output.name}"
+
                     button.isEnabled = true
+                    refreshLibrary()
+
                     Toast.makeText(
                         this,
                         "Archivo Opus creado",
                         Toast.LENGTH_LONG
                     ).show()
                 }
+
             } catch (e: Exception) {
                 runOnUiThread {
                     conversionStatus.text =
                         "Error: ${e.message ?: "No se pudo convertir"}"
+
                     button.isEnabled = true
                 }
             }
@@ -230,7 +398,10 @@ class MainActivity : AppCompatActivity() {
             }
 
             songTitle.text =
-                uri.lastPathSegment ?: "Reproduciendo música"
+                uri.lastPathSegment
+                    ?.substringAfterLast("/")
+                    ?: "Reproduciendo música"
+
             playButton.text = "Ⅱ  PAUSAR"
 
         } catch (e: Exception) {
