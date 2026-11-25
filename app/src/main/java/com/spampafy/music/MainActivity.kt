@@ -5,8 +5,10 @@ import android.content.ComponentName
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.view.Gravity
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
@@ -96,6 +98,14 @@ class MainActivity : AppCompatActivity() {
                                 title ?: "Reproduciendo música"
 
                             updatePlaybackButton()
+                        }
+
+                        override fun onMediaMetadataChanged(
+                            mediaMetadata: MediaMetadata
+                        ) {
+                            songTitle.text =
+                                mediaMetadata.title?.toString()
+                                    ?: "Reproduciendo música"
                         }
 
                         override fun onIsPlayingChanged(
@@ -428,20 +438,110 @@ class MainActivity : AppCompatActivity() {
         libraryContainer.addView(card, params)
     }
 
+    // Obtiene el nombre visible del archivo.
+    private fun getDisplayName(uri: Uri): String {
+
+        var result: String? = null
+
+        try {
+            contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(
+                        OpenableColumns.DISPLAY_NAME
+                    )
+
+                    if (index >= 0) {
+                        result = cursor.getString(index)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+
+        return result
+            ?: uri.lastPathSegment
+                ?.substringAfterLast("/")
+                ?.substringAfterLast(":")
+            ?: "Canción"
+    }
+
+    // Lee los metadatos y la portada incrustada.
     private fun createMediaItem(uri: Uri): MediaItem {
 
-        val title = uri.lastPathSegment
-            ?.substringAfterLast("/")
-            ?.substringAfterLast(":")
-            ?: "Canción"
+        val fileName = getDisplayName(uri)
+        val fallbackTitle = fileName.substringBeforeLast(
+            ".",
+            fileName
+        )
 
-        val metadata = MediaMetadata.Builder()
-            .setTitle(title)
-            .build()
+        var songName: String? = null
+        var artistName: String? = null
+        var albumName: String? = null
+        var artwork: ByteArray? = null
+
+        val retriever = MediaMetadataRetriever()
+
+        try {
+
+            retriever.setDataSource(this, uri)
+
+            songName = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_TITLE
+            )
+
+            artistName = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_ARTIST
+            )
+
+            albumName = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_ALBUM
+            )
+
+            artwork = retriever.embeddedPicture
+
+        } catch (_: Exception) {
+
+            // Si el formato no permite leer metadatos,
+            // se utilizará el nombre del archivo.
+
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
+
+        val metadataBuilder = MediaMetadata.Builder()
+            .setTitle(
+                songName?.takeIf { it.isNotBlank() }
+                    ?: fallbackTitle
+            )
+            .setArtist(
+                artistName?.takeIf { it.isNotBlank() }
+                    ?: "Artista desconocido"
+            )
+
+        if (!albumName.isNullOrBlank()) {
+            metadataBuilder.setAlbumTitle(albumName)
+        }
+
+        if (artwork != null && artwork!!.isNotEmpty()) {
+            metadataBuilder.setArtworkData(
+                artwork,
+                MediaMetadata.PICTURE_TYPE_FRONT_COVER
+            )
+        }
 
         return MediaItem.Builder()
             .setUri(uri)
-            .setMediaMetadata(metadata)
+            .setMediaMetadata(metadataBuilder.build())
             .build()
     }
 
@@ -650,50 +750,4 @@ class MainActivity : AppCompatActivity() {
 
             Toast.makeText(
                 this,
-                "Conectando reproductor...",
-                Toast.LENGTH_SHORT
-            ).show()
-
-            return
-        }
-
-        if (musicPlayer.mediaItemCount == 0) {
-            selectMusic.launch(arrayOf("audio/*"))
-            return
-        }
-
-        if (musicPlayer.isPlaying) {
-            musicPlayer.pause()
-        } else {
-            musicPlayer.play()
-        }
-
-        updatePlaybackButton()
-    }
-
-    private fun updatePlaybackButton() {
-
-        val musicPlayer = controller ?: return
-
-        playButton.text = if (musicPlayer.isPlaying) {
-            "Ⅱ  PAUSAR"
-        } else {
-            "▶  CONTINUAR"
-        }
-    }
-
-    override fun onDestroy() {
-
-        controller = null
-
-        controllerFuture?.let {
-            MediaController.releaseFuture(it)
-        }
-
-        controllerFuture = null
-
-        executor.shutdown()
-
-        super.onDestroy()
-    }
-}
+                "
