@@ -27,6 +27,16 @@ class MusicService : MediaSessionService() {
         return mediaSession
     }
 
+    override fun onTaskRemoved(rootIntent: android.content.Intent?) {
+        val currentPlayer = player
+
+        if (currentPlayer == null || !currentPlayer.playWhenReady ||
+            currentPlayer.mediaItemCount == 0
+        ) {
+            stopSelf()
+        }
+    }
+
     override fun onDestroy() {
         mediaSession?.release()
         mediaSession = null
