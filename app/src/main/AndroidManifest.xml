@@ -13,6 +13,9 @@
 
     <application
         android:allowBackup="true"
+<activity
+    android:name=".PlayerActivity"
+    android:exported="false" />
         android:label="Spampafy"
         android:theme="@style/Theme.Spampafy"
         android:usesCleartextTraffic="false">
