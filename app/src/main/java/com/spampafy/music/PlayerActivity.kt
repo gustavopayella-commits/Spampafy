@@ -2,6 +2,7 @@
 package com.spampafy.music
 
 import android.content.ComponentName
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
@@ -9,9 +10,11 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.widget.*
+import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -26,6 +29,10 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var progress: SeekBar
     private lateinit var currentTime: TextView
     private lateinit var totalTime: TextView
+    private lateinit var coverImage: ImageView
+    private lateinit var coverPlaceholder: TextView
+
+    private var lastArtworkData: ByteArray? = null
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -61,10 +68,7 @@ class PlayerActivity : AppCompatActivity() {
             }
         }
 
-        root.addView(
-            back,
-            LinearLayout.LayoutParams(-1, 50)
-        )
+        root.addView(back, LinearLayout.LayoutParams(-1, 50))
 
         val logo = TextView(this).apply {
             text = "♫ SPAMPAFY"
@@ -77,7 +81,17 @@ class PlayerActivity : AppCompatActivity() {
 
         root.addView(logo)
 
-        val cover = TextView(this).apply {
+        // Portada del álbum
+        val coverContainer = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(38, 30, 58))
+        }
+
+        coverImage = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            visibility = ImageView.GONE
+        }
+
+        coverPlaceholder = TextView(this).apply {
             text = "♫"
             textSize = 115f
             gravity = Gravity.CENTER
@@ -85,8 +99,18 @@ class PlayerActivity : AppCompatActivity() {
             setBackgroundColor(Color.rgb(38, 30, 58))
         }
 
+        coverContainer.addView(
+            coverImage,
+            FrameLayout.LayoutParams(-1, -1)
+        )
+
+        coverContainer.addView(
+            coverPlaceholder,
+            FrameLayout.LayoutParams(-1, -1)
+        )
+
         root.addView(
-            cover,
+            coverContainer,
             LinearLayout.LayoutParams(-1, 280)
         )
 
@@ -112,6 +136,7 @@ class PlayerActivity : AppCompatActivity() {
 
         progress = SeekBar(this).apply {
             max = 1000
+
             progressTintList =
                 android.content.res.ColorStateList.valueOf(
                     Color.rgb(167, 139, 250)
@@ -157,7 +182,6 @@ class PlayerActivity : AppCompatActivity() {
             LinearLayout.LayoutParams(-1, 45)
 
         progressParams.topMargin = 20
-
         root.addView(progress, progressParams)
 
         val times = LinearLayout(this).apply {
@@ -281,9 +305,17 @@ class PlayerActivity : AppCompatActivity() {
 
                 controller?.addListener(
                     object : Player.Listener {
+
                         override fun onMediaItemTransition(
                             mediaItem: MediaItem?,
                             reason: Int
+                        ) {
+                            lastArtworkData = null
+                            updatePlayerInfo()
+                        }
+
+                        override fun onMediaMetadataChanged(
+                            mediaMetadata: MediaMetadata
                         ) {
                             updatePlayerInfo()
                         }
@@ -323,12 +355,15 @@ class PlayerActivity : AppCompatActivity() {
             metadata.artist?.toString()
                 ?: "Artista no disponible"
 
+        updateArtwork(metadata.artworkData)
+
         playButton.text =
             if (player.isPlaying) "Ⅱ" else "▶"
 
         val duration = player.duration
-            .takeIf { it != androidx.media3.common.C.TIME_UNSET }
-            ?: 0L
+            .takeIf {
+                it != androidx.media3.common.C.TIME_UNSET
+            } ?: 0L
 
         val position = player.currentPosition
 
@@ -345,8 +380,50 @@ class PlayerActivity : AppCompatActivity() {
         totalTime.text = formatTime(duration)
     }
 
+    private fun updateArtwork(artworkData: ByteArray?) {
+
+        if (artworkData == null || artworkData.isEmpty()) {
+            coverImage.setImageDrawable(null)
+            coverImage.visibility = ImageView.GONE
+            coverPlaceholder.visibility = TextView.VISIBLE
+            lastArtworkData = null
+            return
+        }
+
+        if (lastArtworkData?.contentEquals(artworkData) == true) {
+            return
+        }
+
+        try {
+            val bitmap = BitmapFactory.decodeByteArray(
+                artworkData,
+                0,
+                artworkData.size
+            )
+
+            if (bitmap != null) {
+                coverImage.setImageBitmap(bitmap)
+                coverImage.visibility = ImageView.VISIBLE
+                coverPlaceholder.visibility = TextView.GONE
+                lastArtworkData = artworkData
+            } else {
+                coverImage.setImageDrawable(null)
+                coverImage.visibility = ImageView.GONE
+                coverPlaceholder.visibility = TextView.VISIBLE
+                lastArtworkData = artworkData
+            }
+
+        } catch (e: Exception) {
+            coverImage.setImageDrawable(null)
+            coverImage.visibility = ImageView.GONE
+            coverPlaceholder.visibility = TextView.VISIBLE
+            lastArtworkData = artworkData
+        }
+    }
+
     private fun formatTime(milliseconds: Long): String {
         val seconds = (milliseconds / 1000).coerceAtLeast(0)
+
         return String.format(
             "%d:%02d",
             seconds / 60,
