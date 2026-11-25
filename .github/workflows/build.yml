@@ -23,6 +23,17 @@ jobs:
 
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      - name: Aceptar licencias Android
+        run: yes | sdkmanager --licenses || true
+
+      - name: Instalar SDK Android
+        run: |
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
 
       - name: Configurar Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -50,7 +61,6 @@ jobs:
           for CLASS in $(jar tf /tmp/opusencoder.jar | grep '\.class$' | grep -v '\$' | sed 's#/#.#g;s#\.class$##'); do
             javap -classpath /tmp/opusencoder.jar -p "$CLASS"
           done
-
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
