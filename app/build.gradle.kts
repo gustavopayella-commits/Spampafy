@@ -12,7 +12,6 @@ android {
         applicationId = "com.spampafy.music"
         minSdk = 26
         targetSdk = 35
-
         versionCode = 1
         versionName = "1.0"
     }
@@ -41,6 +40,9 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-session:1.5.1")
 
-    // Interfaz
+    // Interfaz Android
     implementation("androidx.activity:activity-ktx:1.9.3")
+
+    // Motor de conversión Ogg Opus
+    implementation("io.element.android:opusencoder:1.2.0")
 }
