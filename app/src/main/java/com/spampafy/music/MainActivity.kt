@@ -11,7 +11,9 @@ import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 class MusicService : MediaSessionService() {
 
-    private var player: ExoPlayer? = null
+    private var controller: MediaController? = null
+private var controllerFuture: ListenableFuture<MediaController>? = null
+private var pendingUri: Uri? = null
     private var mediaSession: MediaSession? = null
 
     override fun onCreate() {
