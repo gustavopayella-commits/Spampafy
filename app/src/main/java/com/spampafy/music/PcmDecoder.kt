@@ -2,224 +2,158 @@
 package com.spampafy.music
 
 import android.content.Context
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
 import android.net.Uri
-import java.nio.ByteOrder
+import io.element.android.opusencoder.OggOpusEncoder
+import io.element.android.opusencoder.configuration.SampleRate
+import java.io.File
 
-class PcmDecoder(
-    private val context: Context
-) {
+class PcmToOpus(private val context: Context) {
 
-    data class AudioInfo(
-        val sampleRate: Int,
-        val channels: Int,
-        val mime: String
-    )
-
-    fun inspect(uri: Uri): AudioInfo {
-        val extractor = MediaExtractor()
-
-        try {
-            extractor.setDataSource(context, uri, null)
-
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME)
-                    ?: continue
-
-                if (mime.startsWith("audio/")) {
-                    return AudioInfo(
-                        format.getInteger(MediaFormat.KEY_SAMPLE_RATE),
-                        format.getInteger(MediaFormat.KEY_CHANNEL_COUNT),
-                        mime
-                    )
-                }
-            }
-
-            throw IllegalArgumentException("No se encontró audio")
-
-        } finally {
-            extractor.release()
-        }
+    companion object {
+        val BITRATES = listOf(32000, 48000, 64000, 96000)
     }
 
-    fun decode(
+    private val decoder = PcmDecoder(context)
+
+    fun convert(
         uri: Uri,
-        onFormat: (AudioInfo) -> Unit,
-        onPcm: (ShortArray, Int, Int) -> Unit
-    ) {
-        val extractor = MediaExtractor()
-        var codec: MediaCodec? = null
+        bitrate: Int,
+        onProgress: (String) -> Unit = {}
+    ): File {
+        require(bitrate in BITRATES) {
+            "Calidad Opus no válida"
+        }
+
+        val inputInfo = decoder.inspect(uri)
+
+        val outputDirectory = File(
+            context.getExternalFilesDir(null),
+            "Spampafy/Converted"
+        )
+
+        if (!outputDirectory.exists() &&
+            !outputDirectory.mkdirs()
+        ) {
+            throw IllegalStateException(
+                "No se pudo crear la carpeta de destino"
+            )
+        }
+
+        val originalName = uri.lastPathSegment
+            ?.substringAfterLast("/")
+            ?.substringBeforeLast(".")
+            ?.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            ?.take(80)
+            ?.ifBlank { "musica" }
+            ?: "musica"
+
+        val outputFile = File(
+            outputDirectory,
+            "${originalName}_${bitrate / 1000}kbps.opus"
+        )
+
+        val sampleRate = when (inputInfo.sampleRate) {
+            48000 -> SampleRate.Rate48kHz
+            24000 -> SampleRate.Rate24KHz
+            16000 -> SampleRate.Rate16kHz
+            12000 -> SampleRate.Rate12kHz
+            8000 -> SampleRate.Rate8khz
+            else -> throw IllegalArgumentException(
+                "Frecuencia de audio no compatible: ${inputInfo.sampleRate} Hz"
+            )
+        }
+
+        var encoder: OggOpusEncoder? = null
 
         try {
-            extractor.setDataSource(context, uri, null)
+            onProgress("Preparando conversión...")
 
-            var audioFormat: MediaFormat? = null
-            var audioMime: String? = null
+            encoder = OggOpusEncoder.create()
 
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME)
-
-                if (mime?.startsWith("audio/") == true) {
-                    extractor.selectTrack(i)
-                    audioFormat = format
-                    audioMime = mime
-                    break
-                }
-            }
-
-            val format = audioFormat
-                ?: throw IllegalArgumentException("No hay pista de audio")
-
-            val mime = audioMime
-                ?: throw IllegalArgumentException("Formato desconocido")
-
-            codec = MediaCodec.createDecoderByType(mime)
-            codec.configure(format, null, null, 0)
-            codec.start()
-
-            var inputFinished = false
-            var outputFinished = false
-
-            var sampleRate = format.getInteger(
-                MediaFormat.KEY_SAMPLE_RATE
+            val initResult = encoder.init(
+                outputFile.absolutePath,
+                sampleRate
             )
 
-            var channels = format.getInteger(
-                MediaFormat.KEY_CHANNEL_COUNT
+            check(initResult == 0) {
+                "No se pudo iniciar el codificador Opus: $initResult"
+            }
+
+            val bitrateResult = encoder.setBitrate(bitrate)
+
+            check(bitrateResult == 0) {
+                "No se pudo configurar la calidad Opus"
+            }
+
+            onProgress("Convirtiendo audio...")
+
+            decoder.decode(
+                uri,
+                onFormat = { info ->
+                    check(info.channels in 1..2) {
+                        "Cantidad de canales no compatible"
+                    }
+
+                    check(info.sampleRate == inputInfo.sampleRate) {
+                        "La frecuencia de salida cambió durante la conversión"
+                    }
+                },
+                onPcm = { samples, rate, channels ->
+
+                    check(rate == inputInfo.sampleRate) {
+                        "Frecuencia de audio inesperada"
+                    }
+
+                    val mono = when (channels) {
+                        1 -> samples
+
+                        2 -> {
+                            check(samples.size % 2 == 0) {
+                                "Muestras estéreo incompletas"
+                            }
+
+                            ShortArray(samples.size / 2) { index ->
+                                val left = samples[index * 2].toInt()
+                                val right = samples[index * 2 + 1].toInt()
+
+                                ((left + right) / 2).toShort()
+                            }
+                        }
+
+                        else -> throw IllegalArgumentException(
+                            "Solo se admite audio mono o estéreo"
+                        )
+                    }
+
+                    if (mono.isNotEmpty()) {
+                        val result = encoder.encode(
+                            mono,
+                            mono.size
+                        )
+
+                        check(result == 0) {
+                            "Error al codificar audio: $result"
+                        }
+                    }
+                }
             )
 
-            onFormat(AudioInfo(sampleRate, channels, mime))
+            onProgress("Finalizando archivo...")
 
-            val info = MediaCodec.BufferInfo()
-
-            while (!outputFinished) {
-
-                if (!inputFinished) {
-                    val inputIndex = codec.dequeueInputBuffer(10000)
-
-                    if (inputIndex >= 0) {
-                        val inputBuffer = codec.getInputBuffer(inputIndex)
-                            ?: throw IllegalStateException("Buffer de entrada vacío")
-
-                        inputBuffer.clear()
-
-                        val size = extractor.readSampleData(inputBuffer, 0)
-
-                        if (size < 0) {
-                            codec.queueInputBuffer(
-                                inputIndex,
-                                0,
-                                0,
-                                0,
-                                MediaCodec.BUFFER_FLAG_END_OF_STREAM
-                            )
-                            inputFinished = true
-                        } else {
-                            codec.queueInputBuffer(
-                                inputIndex,
-                                0,
-                                size,
-                                extractor.sampleTime,
-                                0
-                            )
-                            extractor.advance()
-                        }
-                    }
-                }
-
-                when (val outputIndex =
-                    codec.dequeueOutputBuffer(info, 10000)) {
-
-                    MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        val outputFormat = codec.outputFormat
-
-                        sampleRate = outputFormat.getInteger(
-                            MediaFormat.KEY_SAMPLE_RATE
-                        )
-
-                        channels = outputFormat.getInteger(
-                            MediaFormat.KEY_CHANNEL_COUNT
-                        )
-
-                        val encoding = if (
-                            outputFormat.containsKey(
-                                MediaFormat.KEY_PCM_ENCODING
-                            )
-                        ) {
-                            outputFormat.getInteger(
-                                MediaFormat.KEY_PCM_ENCODING
-                            )
-                        } else {
-                            android.media.AudioFormat.ENCODING_PCM_16BIT
-                        }
-
-                        if (encoding !=
-                            android.media.AudioFormat.ENCODING_PCM_16BIT
-                        ) {
-                            throw IllegalStateException(
-                                "El decodificador no produjo PCM de 16 bits"
-                            )
-                        }
-
-                        onFormat(
-                            AudioInfo(sampleRate, channels, mime)
-                        )
-                    }
-
-                    MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                        // Esperar más datos.
-                    }
-
-                    else -> {
-                        if (outputIndex >= 0) {
-                            val outputBuffer =
-                                codec.getOutputBuffer(outputIndex)
-
-                            if (outputBuffer != null && info.size > 0) {
-                                outputBuffer.position(info.offset)
-                                outputBuffer.limit(info.offset + info.size)
-
-                                val pcmBuffer = outputBuffer.slice()
-                                    .order(ByteOrder.LITTLE_ENDIAN)
-
-                                val samples = ShortArray(
-                                    pcmBuffer.remaining() / 2
-                                )
-
-                                pcmBuffer.asShortBuffer().get(samples)
-
-                                onPcm(
-                                    samples,
-                                    sampleRate,
-                                    channels
-                                )
-                            }
-
-                            if (
-                                info.flags and
-                                MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
-                            ) {
-                                outputFinished = true
-                            }
-
-                            codec.releaseOutputBuffer(outputIndex, false)
-                        }
-                    }
-                }
+            check(outputFile.exists() && outputFile.length() > 0) {
+                "No se generó el archivo Opus"
             }
+
+            onProgress("Conversión terminada")
+
+            return outputFile
+
+        } catch (e: Exception) {
+            outputFile.delete()
+            throw e
 
         } finally {
-            try {
-                codec?.stop()
-            } catch (_: Exception) {
-            }
-
-            codec?.release()
-            extractor.release()
+            encoder?.release()
         }
     }
 }
