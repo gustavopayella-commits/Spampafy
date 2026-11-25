@@ -41,7 +41,7 @@ jobs:
           gradle-version: 8.9
 
       - name: Compilar Spampafy
-        run: gradle assembleDebug
+        run: gradle assembleDebug --stacktrace --info
 
       - name: Inspeccionar motor Opus
         run: |
