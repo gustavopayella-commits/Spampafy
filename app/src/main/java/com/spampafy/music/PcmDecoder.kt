@@ -7,7 +7,9 @@ import io.element.android.opusencoder.OggOpusEncoder
 import io.element.android.opusencoder.configuration.SampleRate
 import java.io.File
 
-class PcmToOpus(private val context: Context) {
+class PcmDecoder(
+    private val context: Context
+) {
 
     companion object {
         val BITRATES = listOf(32000, 48000, 64000, 96000)
