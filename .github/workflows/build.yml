@@ -1,4 +1,3 @@
-
 name: Spampafy Android APK
 
 on:
@@ -40,20 +39,7 @@ jobs:
         with:
           gradle-version: 8.9
 
-            - name: Generar keystore Debug
-        run: |
-          mkdir -p ~/.android
-          keytool -genkeypair -v \
-            -keystore ~/.android/debug.keystore \
-            -storepass android \
-            -alias AndroidDebugKey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
-
-            - name: Generar keystore Debug
+      - name: Generar keystore Debug
         run: |
           mkdir -p ~/.android
           keytool -genkeypair -v \
@@ -87,7 +73,7 @@ jobs:
           jar tf /tmp/opusencoder.jar | grep -i opus
 
           echo "=== METODOS DISPONIBLES ==="
-          for CLASS in $(jar tf /tmp/opusencoder.jar | grep '\.class$' | grep -v '\$' | sed 's#/#.#g;s#\.class$##'); do
+          for CLASS in $(jar tf /tmp/opusencoder.jar | grep '\\.class$' | grep -v '\\$' | sed 's#/#.#g;s#\\.class$##'); do
             javap -classpath /tmp/opusencoder.jar -p "$CLASS"
           done
 
