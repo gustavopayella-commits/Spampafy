@@ -16,7 +16,7 @@ import java.util.Locale
 
 class EqualizerActivity : AppCompatActivity() {
 
-    private val background = Color.rgb(13, 13, 20)
+    private val bgColor = Color.rgb(13, 13, 20)
     private val panel = Color.rgb(29, 27, 43)
     private val violet = Color.rgb(167, 139, 250)
 
@@ -31,7 +31,7 @@ class EqualizerActivity : AppCompatActivity() {
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(20, 24, 20, 20)
-            setBackgroundColor(background)
+            setBackgroundColor(bgColor)
         }
 
         val scroll = ScrollView(this)
