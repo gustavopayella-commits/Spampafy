@@ -1,15 +1,21 @@
-
 package com.spampafy.music
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
+import android.view.View
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -21,6 +27,8 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -28,521 +36,428 @@ class MainActivity : AppCompatActivity() {
 
     private var controller: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
-    private var pendingUri: Uri? = null
-
     private val executor = Executors.newSingleThreadExecutor()
+    private val prefs by lazy { getSharedPreferences("spampafy_data", MODE_PRIVATE) }
 
-    private lateinit var songTitle: TextView
-    private lateinit var playButton: Button
-    private lateinit var conversionStatus: TextView
-    private lateinit var qualitySpinner: Spinner
-    private lateinit var libraryContainer: LinearLayout
+    private lateinit var root: LinearLayout
+    private lateinit var content: LinearLayout
+    private lateinit var nav: LinearLayout
+    private var currentTab = "Inicio"
+    private var allTracks: MutableList<Track> = mutableListOf()
+    private var selectedUris: MutableList<Uri> = mutableListOf()
+    private var searchQuery = ""
+    private var conversionStatus: TextView? = null
 
-    private var selectedUris: List<Uri> = emptyList()
-
-    private val selectMusic =
-        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-            if (uris.isNotEmpty()) {
-                selectedUris = uris
-                Toast.makeText(this, "${uris.size} canción(es) seleccionada(s)", Toast.LENGTH_SHORT).show()
-                playMusic(uris.first())
-            }
+    data class Track(
+        val uri: Uri,
+        val title: String,
+        val artist: String,
+        val album: String,
+        val artwork: ByteArray? = null
+    ) {
+        fun key() = uri.toString()
+        fun mediaItem(): MediaItem {
+            val builder = MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artist)
+                .setAlbumTitle(album)
+            artwork?.let { if (it.isNotEmpty()) builder.setArtworkData(it, MediaMetadata.PICTURE_TYPE_FRONT_COVER) }
+            return MediaItem.Builder().setUri(uri).setMediaMetadata(builder.build()).build()
         }
+    }
+
+    private val chooseAudio = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
+            uris.forEach { uri ->
+                try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
+                if (selectedUris.none { it.toString() == uri.toString() }) selectedUris.add(uri)
+            }
+            saveSelectedUris()
+            loadLibrary()
+            Toast.makeText(this, "${uris.size} archivo(s) agregados", Toast.LENGTH_SHORT).show()
+            playTracks(uris.mapNotNull { findTrack(it) }, 0)
+        }
+    }
+
+    private val requestAudioPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        loadLibrary()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        createInterface()
-        refreshLibrary()
-        connectToMusicService()
+        selectedUris = loadSelectedUris()
+        buildShell()
+        connectPlayer()
+        loadLibrary()
+        requestLibraryPermissionIfNeeded()
     }
 
-    private fun connectToMusicService() {
-        val token = SessionToken(this, ComponentName(this, MusicService::class.java))
-        val future = MediaController.Builder(this, token).buildAsync()
-        controllerFuture = future
+    private fun requestLibraryPermissionIfNeeded() {
+        val permission = if (Build.VERSION.SDK_INT >= 33) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+            requestAudioPermission.launch(permission)
+        }
+    }
 
-        future.addListener({
-            try {
-                controller = future.get()
+    private fun buildShell() {
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(13, 13, 20))
+        }
+        val header = TextView(this).apply {
+            text = "♫  SPAMPAFY"
+            textSize = 25f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(167, 139, 250))
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(20, 12, 20, 8)
+        }
+        root.addView(header, LinearLayout.LayoutParams(-1, 58))
+        content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(18, 8, 18, 14)
+        }
+        val scroll = ScrollView(this)
+        scroll.addView(content)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        nav = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Color.rgb(25, 23, 36))
+            setPadding(4, 6, 4, 6)
+        }
+        root.addView(nav, LinearLayout.LayoutParams(-1, 62))
+        setContentView(root)
+        renderNavigation()
+        showTab("Inicio")
+    }
 
-                controller?.addListener(object : Player.Listener {
-                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                        songTitle.text = mediaItem?.mediaMetadata?.title?.toString()
-                            ?: "Reproduciendo música"
-                        updatePlaybackButton()
-                    }
-
-                    override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-                        songTitle.text = mediaMetadata.title?.toString()
-                            ?: "Reproduciendo música"
-                    }
-
-                    override fun onIsPlayingChanged(isPlaying: Boolean) {
-                        updatePlaybackButton()
-                    }
-                })
-
-                pendingUri?.let {
-                    pendingUri = null
-                    playMusic(it)
-                }
-
-                updatePlaybackButton()
-            } catch (_: Exception) {
-                Toast.makeText(this, "No se pudo conectar el reproductor", Toast.LENGTH_LONG).show()
+    private fun renderNavigation() {
+        nav.removeAllViews()
+        listOf("Inicio" to "⌂", "Buscar" to "⌕", "Biblioteca" to "▤", "Favoritos" to "♥").forEach { (label, symbol) ->
+            val b = TextView(this).apply {
+                text = "$symbol\n$label"
+                textSize = 11f
+                gravity = Gravity.CENTER
+                setTextColor(if (currentTab == label) Color.rgb(167,139,250) else Color.LTGRAY)
+                setOnClickListener { showTab(label) }
             }
-        }, ContextCompat.getMainExecutor(this))
+            nav.addView(b, LinearLayout.LayoutParams(0, -1, 1f))
+        }
     }
 
-    private fun openPlayerScreen() {
+    private fun showTab(tab: String) {
+        currentTab = tab
+        renderNavigation()
+        content.removeAllViews()
+        when (tab) {
+            "Inicio" -> showHome()
+            "Buscar" -> showSearch()
+            "Biblioteca" -> showLibrary()
+            "Favoritos" -> showFavorites()
+        }
+    }
+
+    private fun heading(text: String) {
+        content.addView(TextView(this).apply {
+            this.text = text
+            textSize = 23f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            setPadding(0, 12, 0, 14)
+        })
+    }
+
+    private fun actionButton(label: String, action: () -> Unit) {
+        val b = Button(this).apply {
+            text = label
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.rgb(91, 40, 170))
+            setOnClickListener { action() }
+        }
+        content.addView(b, LinearLayout.LayoutParams(-1, 48).apply { bottomMargin = 8 })
+    }
+
+    private fun showHome() {
+        heading("Tu música")
+        content.addView(TextView(this).apply {
+            text = "Escuchá tus canciones y descubrí tu biblioteca"
+            textSize = 14f
+            setTextColor(Color.LTGRAY)
+        })
+        actionButton("＋  Agregar música", { chooseAudio.launch(arrayOf("audio/*")) })
+        actionButton("▶  Reproducir toda mi música", { playTracks(allTracks, 0) })
+        actionButton("♫  Cola de reproducción", { showQueue() })
+        actionButton("🎚  Ecualizador", { startActivity(Intent(this, EqualizerActivity::class.java)) })
+        actionButton("⇄  Convertir a OPUS", { showConverter() })
+        heading("Reproducidas / Biblioteca")
+        allTracks.take(8).forEach { addTrackRow(it) }
+        if (allTracks.isEmpty()) emptyMessage("Agregá música para comenzar.")
+    }
+
+    private fun showSearch() {
+        heading("Buscar")
+        val input = EditText(this).apply {
+            hint = "Canción, artista o álbum"
+            setHintTextColor(Color.GRAY)
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            setSingleLine(true)
+            setPadding(14, 8, 14, 8)
+            setBackgroundColor(Color.rgb(35, 32, 48))
+        }
+        content.addView(input, LinearLayout.LayoutParams(-1, 52))
+        val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(results)
+        fun update(q: String) {
+            results.removeAllViews()
+            val matches = allTracks.filter {
+                it.title.contains(q, true) || it.artist.contains(q, true) || it.album.contains(q, true)
+            }
+            matches.forEach { addTrackRow(it, results) }
+            if (matches.isEmpty()) addEmpty(results, if (q.isBlank()) "Escribí para buscar en tu música." else "No se encontraron canciones.")
+        }
+        input.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { update(s?.toString().orEmpty()) }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        update("")
+    }
+
+    private fun showLibrary() {
+        heading("Tu biblioteca")
+        actionButton("＋  Agregar canciones", { chooseAudio.launch(arrayOf("audio/*")) })
+        actionButton("＋  Crear lista de reproducción", { createPlaylistDialog() })
+        actionButton("♫  Ver cola de reproducción", { showQueue() })
+        actionButton("⇄  Convertir música a OPUS", { showConverter() })
+        heading("Canciones")
+        allTracks.forEach { addTrackRow(it) }
+        if (allTracks.isEmpty()) emptyMessage("No hay canciones. Tocá Agregar canciones.")
+        heading("Tus listas")
+        getPlaylists().forEach { playlist ->
+            val row = TextView(this).apply {
+                text = "♫  ${playlist.first}  (${playlist.second.size})"
+                textSize = 16f
+                setTextColor(Color.WHITE)
+                setPadding(12, 14, 12, 14)
+                setBackgroundColor(Color.rgb(32, 27, 49))
+                setOnClickListener { showPlaylist(playlist.first, playlist.second) }
+            }
+            content.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 7 })
+        }
+    }
+
+    private fun showFavorites() {
+        heading("Tus favoritos ♥")
+        val keys = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
+        val favorites = allTracks.filter { keys.contains(it.key()) }
+        favorites.forEach { addTrackRow(it) }
+        if (favorites.isEmpty()) emptyMessage("Todavía no agregaste favoritos. Usá ☆ en una canción.")
+    }
+
+    private fun addTrackRow(track: Track, parent: LinearLayout = content) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(10, 9, 6, 9)
+            setBackgroundColor(Color.rgb(29, 27, 40))
+        }
+        val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        labels.addView(TextView(this).apply {
+            text = track.title
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            maxLines = 1
+        })
+        labels.addView(TextView(this).apply {
+            text = "${track.artist}  •  ${track.album}"
+            textSize = 12f
+            setTextColor(Color.LTGRAY)
+            maxLines = 1
+        })
+        labels.setOnClickListener { playTracks(listOf(track), 0) }
+        row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+        val favorite = TextView(this).apply {
+            textSize = 22f
+            setTextColor(Color.rgb(190, 120, 255))
+            text = if (isFavorite(track)) "♥" else "♡"
+            setPadding(8, 4, 8, 4)
+            setOnClickListener { toggleFavorite(track); text = if (isFavorite(track)) "♥" else "♡" }
+        }
+        row.addView(favorite)
+        val more = TextView(this).apply {
+            text = "⋮"
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            setPadding(10, 2, 8, 2)
+            setOnClickListener { showTrackOptions(track) }
+        }
+        row.addView(more)
+        parent.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 6 })
+    }
+
+    private fun showTrackOptions(track: Track) {
+        val options = if (track.uri.scheme == "file" && track.uri.path?.endsWith(".opus", true) == true) {
+            arrayOf("Reproducir", "Agregar a favoritos / quitar", "Agregar a una lista", "Agregar a la cola", "Eliminar archivo OPUS")
+        } else {
+            arrayOf("Reproducir", "Agregar a favoritos / quitar", "Agregar a una lista", "Agregar a la cola")
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this).setTitle(track.title).setItems(options) { _, which ->
+            when (which) {
+                0 -> playTracks(listOf(track), 0)
+                1 -> { toggleFavorite(track); Toast.makeText(this, "Favoritos actualizados", Toast.LENGTH_SHORT).show(); if (currentTab == "Favoritos") showTab("Favoritos") }
+                2 -> addTrackToPlaylistDialog(track)
+                3 -> { appendToQueue(track); Toast.makeText(this, "Agregada a la cola", Toast.LENGTH_SHORT).show() }
+                4 -> {
+                    val file = File(track.uri.path ?: "")
+                    androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle("Eliminar canción")
+                        .setMessage("¿Querés eliminar ${file.name}?")
+                        .setNegativeButton("Cancelar", null)
+                        .setPositiveButton("Eliminar") { _, _ ->
+                            if (file.delete()) loadLibrary()
+                            else Toast.makeText(this, "No se pudo eliminar", Toast.LENGTH_SHORT).show()
+                        }.show()
+                }
+            }
+        }.show()
+    }
+
+    private fun showQueue() {
+        content.removeAllViews()
+        heading("Cola de reproducción")
+        val player = controller
+        if (player == null || player.mediaItemCount == 0) {
+            emptyMessage("No hay canciones en la cola.")
+            return
+        }
+        val current = player.currentMediaItemIndex
+        for (i in 0 until player.mediaItemCount) {
+            val metadata = player.getMediaItemAt(i).mediaMetadata
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(8, 10, 8, 10)
+                setBackgroundColor(if (i == current) Color.rgb(58, 42, 85) else Color.rgb(29,27,40))
+            }
+            val name = TextView(this).apply {
+                text = (if (i == current) "▶  " else "") + (metadata.title?.toString() ?: "Canción")
+                setTextColor(Color.WHITE)
+                textSize = 14f
+            }
+            row.addView(name, LinearLayout.LayoutParams(0, -2, 1f))
+            val play = smallButton("▶") { player.seekToDefaultPosition(i); player.play(); showQueue() }
+            val up = smallButton("↑") { if (i > 0) { moveQueueItem(i, i - 1); showQueue() } }
+            val down = smallButton("↓") { if (i < player.mediaItemCount - 1) { moveQueueItem(i, i + 1); showQueue() } }
+            row.addView(play); row.addView(up); row.addView(down)
+            content.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 5 })
+        }
+        actionButton("Volver a Inicio", { showTab("Inicio") })
+    }
+
+    private fun moveQueueItem(from: Int, to: Int) {
+        val p = controller ?: return
+        val items = (0 until p.mediaItemCount).map { p.getMediaItemAt(it) }.toMutableList()
+        val item = items.removeAt(from)
+        items.add(to, item)
+        val currentUri = p.currentMediaItem?.localConfiguration?.uri
+        val newIndex = items.indexOfFirst { it.localConfiguration?.uri == currentUri }.coerceAtLeast(0)
+        p.setMediaItems(items, newIndex, p.currentPosition)
+        p.prepare()
+        p.play()
+    }
+
+    private fun smallButton(label: String, action: () -> Unit): Button = Button(this).apply {
+        text = label
+        minWidth = 38
+        setPadding(0, 0, 0, 0)
+        setOnClickListener { action() }
+    }
+
+    private fun createPlaylistDialog() {
+        val input = EditText(this).apply { hint = "Nombre de la lista"; setTextColor(Color.WHITE) }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Nueva lista").setView(input)
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("Crear") { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    val playlists = readPlaylists()
+                    if (!playlists.has(name)) playlists.put(name, JSONArray())
+                    savePlaylists(playlists)
+                    if (currentTab == "Biblioteca") showTab("Biblioteca")
+                }
+            }.show()
+    }
+
+    private fun addTrackToPlaylistDialog(track: Track) {
+        val playlists = readPlaylists()
+        val names = (0 until playlists.length()).map { playlists.names().getString(it) }
+        if (names.isEmpty()) { createPlaylistDialog(); return }
+        androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Agregar a lista").setItems(names.toTypedArray()) { _, which ->
+            val name = names[which]
+            val arr = playlists.optJSONArray(name) ?: JSONArray()
+            if ((0 until arr.length()).none { arr.optString(it) == track.key() }) arr.put(track.key())
+            playlists.put(name, arr); savePlaylists(playlists)
+            Toast.makeText(this, "Agregada a $name", Toast.LENGTH_SHORT).show()
+        }.setPositiveButton("Cerrar", null).show()
+    }
+
+    private fun showPlaylist(name: String, keys: List<String>) {
+        content.removeAllViews()
+        heading(name)
+        val tracks = allTracks.filter { keys.contains(it.key()) }
+        actionButton("▶  Reproducir lista", { playTracks(tracks, 0) })
+        tracks.forEach { addTrackRow(it) }
+        actionButton("Eliminar lista", {
+            val p = readPlaylists(); p.remove(name); savePlaylists(p); showTab("Biblioteca")
+        })
+    }
+
+    private fun getPlaylists(): List<Pair<String, List<String>>> {
+        val p = readPlaylists()
+        return (0 until p.length()).mapNotNull { i ->
+            val name = p.names().optString(i)
+            val arr = p.optJSONArray(name) ?: JSONArray()
+            name to (0 until arr.length()).map { arr.optString(it) }
+        }
+    }
+
+    private fun readPlaylists(): JSONObject = try { JSONObject(prefs.getString("playlists", "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
+    private fun savePlaylists(p: JSONObject) { prefs.edit().putString("playlists", p.toString()).apply() }
+
+    private fun isFavorite(track: Track) = (prefs.getStringSet("favorites", emptySet()) ?: emptySet()).contains(track.key())
+    private fun toggleFavorite(track: Track) {
+        val keys = (prefs.getStringSet("favorites", emptySet()) ?: emptySet()).toMutableSet()
+        if (!keys.add(track.key())) keys.remove(track.key())
+        prefs.edit().putStringSet("favorites", keys).apply()
+    }
+
+    private fun appendToQueue(track: Track) {
+        val p = controller ?: return
+        p.addMediaItem(track.mediaItem())
+    }
+
+    private fun playTracks(tracks: List<Track>, start: Int) {
+        val p = controller
+        if (p == null) { Toast.makeText(this, "Conectando reproductor...", Toast.LENGTH_SHORT).show(); return }
+        if (tracks.isEmpty()) { Toast.makeText(this, "No hay canciones para reproducir", Toast.LENGTH_SHORT).show(); return }
+        val items = tracks.map { it.mediaItem() }
+        p.setMediaItems(items, start.coerceIn(0, items.lastIndex), C.TIME_UNSET)
+        p.prepare()
+        p.play()
         startActivity(Intent(this, PlayerActivity::class.java))
     }
 
-    private fun createInterface() {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 35, 24, 24)
-            setBackgroundColor(Color.rgb(16, 16, 24))
-        }
-
-        val logo = TextView(this).apply {
-            text = "♫ SPAMPAFY"
-            textSize = 29f
-            setTextColor(Color.rgb(167, 139, 250))
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-        }
-        root.addView(logo, LinearLayout.LayoutParams(-1, 65))
-
-        val subtitle = TextView(this).apply {
-            text = "Tu música, a tu manera"
-            textSize = 15f
-            setTextColor(Color.LTGRAY)
-            gravity = Gravity.CENTER
-        }
-        root.addView(subtitle)
-
-        val section = TextView(this).apply {
-            text = "Escuchá tu música"
-            textSize = 25f
-            setTextColor(Color.WHITE)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 35, 0, 20)
-        }
-        root.addView(section)
-
-        val album = TextView(this).apply {
-            text = "♫"
-            textSize = 100f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(139, 92, 246))
-            setBackgroundColor(Color.rgb(32, 27, 49))
-        }
-        root.addView(album, LinearLayout.LayoutParams(-1, 180))
-
-        songTitle = TextView(this).apply {
-            text = "Ninguna canción seleccionada"
-            textSize = 17f
-            setTextColor(Color.WHITE)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            setPadding(0, 20, 0, 8)
-        }
-        root.addView(songTitle)
-
-        playButton = Button(this).apply {
-            text = "▶  REPRODUCIR"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(109, 40, 217))
-            setOnClickListener { togglePlayback() }
-        }
-        root.addView(playButton, LinearLayout.LayoutParams(-1, 55))
-
-        val addButton = Button(this).apply {
-            text = "＋  AGREGAR MÚSICA"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(35, 35, 49))
-            setOnClickListener { selectMusic.launch(arrayOf("audio/*")) }
-        }
-        root.addView(addButton, LinearLayout.LayoutParams(-1, 50))
-
-        addSeparator(root)
-
-        val converterTitle = TextView(this).apply {
-            text = "CONVERTIR A OPUS"
-            textSize = 20f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(167, 139, 250))
-        }
-        root.addView(converterTitle)
-
-        val qualityLabel = TextView(this).apply {
-            text = "Calidad de audio"
-            textSize = 14f
-            setTextColor(Color.LTGRAY)
-            setPadding(0, 12, 0, 5)
-        }
-        root.addView(qualityLabel)
-
-        qualitySpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                listOf("32 kbps", "48 kbps", "64 kbps", "96 kbps")
-            )
-        }
-        root.addView(qualitySpinner)
-
-        val convertButton = Button(this).apply {
-            text = "CONVERTIR A OPUS"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(109, 40, 217))
-            setOnClickListener { convertSelectedMusic(this) }
-        }
-        root.addView(convertButton, LinearLayout.LayoutParams(-1, 55))
-
-        conversionStatus = TextView(this).apply {
-            text = "Seleccioná una canción para convertir"
-            textSize = 13f
-            setTextColor(Color.LTGRAY)
-            gravity = Gravity.CENTER
-            setPadding(0, 12, 0, 12)
-        }
-        root.addView(conversionStatus)
-
-        addSeparator(root)
-
-        val libraryTitle = TextView(this).apply {
-            text = "MI BIBLIOTECA OPUS"
-            textSize = 20f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(167, 139, 250))
-            setPadding(0, 5, 0, 12)
-        }
-        root.addView(libraryTitle)
-
-        libraryContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        root.addView(libraryContainer)
-
-        val scroll = ScrollView(this)
-        scroll.addView(root)
-        setContentView(scroll)
-    }
-
-    private fun addSeparator(root: LinearLayout) {
-        val separator = TextView(this).apply {
-            text = "━━━━━━━━━━━━━━━━━━━━"
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(109, 40, 217))
-            setPadding(0, 18, 0, 8)
-        }
-        root.addView(separator)
-    }
-
-    private fun getOutputDirectory(): File {
-        return File(getExternalFilesDir(null), "Spampafy/Converted")
-    }
-
-    private fun getOpusFiles(): List<File> {
-        return getOutputDirectory().listFiles()
-            ?.filter { it.isFile && it.extension.equals("opus", true) }
-            ?.sortedBy { it.name.lowercase() }
-            ?: emptyList()
-    }
-
-    private fun refreshLibrary() {
-        if (!::libraryContainer.isInitialized) return
-
-        libraryContainer.removeAllViews()
-        val files = getOpusFiles().sortedByDescending { it.lastModified() }
-
-        if (files.isEmpty()) {
-            val empty = TextView(this).apply {
-                text = "Todavía no tenés canciones convertidas"
-                textSize = 14f
-                setTextColor(Color.LTGRAY)
-                gravity = Gravity.CENTER
-                setPadding(0, 20, 0, 20)
-            }
-            libraryContainer.addView(empty)
-            return
-        }
-
-        files.forEach { addLibraryItem(it) }
-    }
-
-    private fun addLibraryItem(file: File) {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(14, 12, 14, 12)
-            setBackgroundColor(Color.rgb(32, 27, 49))
-        }
-
-        val name = TextView(this).apply {
-            text = "♫  ${file.nameWithoutExtension}"
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE)
-        }
-        card.addView(name)
-
-        val info = TextView(this).apply {
-            val quality = Regex("_([0-9]+)kbps$")
-                .find(file.nameWithoutExtension)?.groupValues?.get(1)
-            text = "Opus • ${quality ?: "Calidad desconocida"} kbps • ${formatSize(file.length())}"
-            textSize = 12f
-            setTextColor(Color.LTGRAY)
-            setPadding(0, 5, 0, 8)
-        }
-        card.addView(info)
-
-        val buttons = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val play = Button(this).apply {
-            text = "▶ REPRODUCIR"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(109, 40, 217))
-            setOnClickListener { playLibraryMusic(file) }
-        }
-
-        val delete = Button(this).apply {
-            text = "ELIMINAR"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(130, 35, 55))
-            setOnClickListener { confirmDelete(file) }
-        }
-
-        buttons.addView(play, LinearLayout.LayoutParams(0, 48, 1f))
-        buttons.addView(delete, LinearLayout.LayoutParams(0, 48, 1f))
-        card.addView(buttons)
-
-        val params = LinearLayout.LayoutParams(-1, -2)
-        params.bottomMargin = 12
-        libraryContainer.addView(card, params)
-    }
-
-    private fun getDisplayName(uri: Uri): String {
-        var result: String? = null
-
-        try {
-            contentResolver.query(
-                uri,
-                arrayOf(OpenableColumns.DISPLAY_NAME),
-                null,
-                null,
-                null
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (index >= 0) result = cursor.getString(index)
-                }
-            }
-        } catch (_: Exception) {
-        }
-
-        return result ?: uri.lastPathSegment?.substringAfterLast("/") ?: "Canción"
-    }
-
-    private fun createMediaItem(uri: Uri): MediaItem {
-        val fileName = getDisplayName(uri)
-        val fallbackTitle = fileName.substringBeforeLast(".", fileName)
-
-        var songName: String? = null
-        var artistName: String? = null
-        var albumName: String? = null
-        var artwork: ByteArray? = null
-
-        val retriever = MediaMetadataRetriever()
-
-        try {
-            retriever.setDataSource(this, uri)
-            songName = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
-            artistName = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
-            albumName = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
-            artwork = retriever.embeddedPicture
-        } catch (_: Exception) {
-        } finally {
-            try {
-                retriever.release()
-            } catch (_: Exception) {
-            }
-        }
-
-        val builder = MediaMetadata.Builder()
-            .setTitle(songName?.takeIf { it.isNotBlank() } ?: fallbackTitle)
-            .setArtist(artistName?.takeIf { it.isNotBlank() } ?: "Artista desconocido")
-
-        if (!albumName.isNullOrBlank()) {
-            builder.setAlbumTitle(albumName)
-        }
-
-        artwork?.let {
-            if (it.isNotEmpty()) {
-                builder.setArtworkData(it, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-            }
-        }
-
-        return MediaItem.Builder()
-            .setUri(uri)
-            .setMediaMetadata(builder.build())
-            .build()
-    }
-
-    private fun playLibraryMusic(file: File) {
-        val files = getOpusFiles()
-        val startIndex = files.indexOfFirst { it.absolutePath == file.absolutePath }
-        if (startIndex < 0) return
-
-        val items = files.map { createMediaItem(Uri.fromFile(it)) }
-        if (playQueue(items, startIndex)) openPlayerScreen()
-    }
-
-    private fun playMusic(uri: Uri) {
-        if (controller == null) {
-            pendingUri = uri
-            return
-        }
-
-        val uris = mutableListOf<Uri>()
-        uris.addAll(selectedUris)
-        getOpusFiles().forEach { uris.add(Uri.fromFile(it)) }
-
-        val uniqueUris = uris.distinctBy { it.toString() }
-        val items = uniqueUris.map { createMediaItem(it) }
-
-        if (playQueue(items, 0)) openPlayerScreen()
-    }
-
-    private fun playQueue(items: List<MediaItem>, startIndex: Int): Boolean {
-        val musicPlayer = controller ?: return false
-
-        if (items.isEmpty()) {
-            Toast.makeText(this, "No hay canciones para reproducir", Toast.LENGTH_SHORT).show()
-            return false
-        }
-
-        return try {
-            musicPlayer.setMediaItems(items, startIndex, C.TIME_UNSET)
-            musicPlayer.prepare()
-            musicPlayer.play()
-            updatePlaybackButton()
-            true
-        } catch (_: Exception) {
-            Toast.makeText(this, "No se pudo iniciar la lista", Toast.LENGTH_LONG).show()
-            false
-        }
-    }
-
-    private fun formatSize(bytes: Long): String {
-        return if (bytes < 1024 * 1024) {
-            String.format("%.1f KB", bytes / 1024.0)
-        } else {
-            String.format("%.2f MB", bytes / (1024.0 * 1024.0))
-        }
-    }
-
-    private fun confirmDelete(file: File) {
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle("Eliminar canción")
-            .setMessage("¿Querés eliminar ${file.name}?")
-            .setNegativeButton("Cancelar", null)
-            .setPositiveButton("Eliminar") { _, _ ->
-                if (file.delete()) {
-                    refreshLibrary()
-                    Toast.makeText(this, "Canción eliminada", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this, "No se pudo eliminar el archivo", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .show()
-    }
-
-    private fun convertSelectedMusic(button: Button) {
-        val uri = selectedUris.firstOrNull()
-
-        if (uri == null) {
-            Toast.makeText(this, "Primero seleccioná una canción", Toast.LENGTH_SHORT).show()
-            selectMusic.launch(arrayOf("audio/*"))
-            return
-        }
-
-        val bitrates = listOf(32000, 48000, 64000, 96000)
-        val bitrate = bitrates[qualitySpinner.selectedItemPosition]
-
-        button.isEnabled = false
-        conversionStatus.text = "Preparando conversión..."
-
-        executor.execute {
-            try {
-                val output = PcmToOpus(this).convert(uri, bitrate) { message ->
-                    runOnUiThread { conversionStatus.text = message }
-                }
-
-                runOnUiThread {
-                    conversionStatus.text = "¡Conversión terminada!\n${output.name}"
-                    button.isEnabled = true
-                    refreshLibrary()
-                    Toast.makeText(this, "Archivo Opus creado", Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    conversionStatus.text = "Error: ${e.message ?: "No se pudo convertir"}"
-                    button.isEnabled = true
-                }
-            }
-        }
-    }
-
-    private fun togglePlayback() {
-        val musicPlayer = controller
-
-        if (musicPlayer == null) {
-            Toast.makeText(this, "El reproductor todavía se está conectando", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        if (musicPlayer.isPlaying) {
-            musicPlayer.pause()
-        } else {
-            if (musicPlayer.mediaItemCount > 0) {
-                musicPlayer.play()
-            } else if (selectedUris.isNotEmpty()) {
-                playMusic(selectedUris.first())
-            } else {
-                selectMusic.launch(arrayOf("audio/*"))
-            }
-        }
-
-        updatePlaybackButton()
-    }
-
-    private fun updatePlaybackButton() {
-        if (!::playButton.isInitialized) return
-
-        runOnUiThread {
-            playButton.text = if (controller?.isPlaying == true) {
-                "Ⅱ  PAUSAR"
-            } else {
-                "▶  REPRODUCIR"
-            }
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        executor.shutdown()
-
-        controller?.release()
-        controller = null
-
-        controllerFuture?.let {
-            MediaController.releaseFuture(it)
-        }
-        controllerFuture = null
-    }
-}
+    private fun connectPlayer() {
+        val token = SessionToken(this, ComponentName(this, MusicService::class.java))
+        val future = MediaController.Builder(this, token).buildAsync()
+        controllerFuture = future
+        future.addListener({
+      
