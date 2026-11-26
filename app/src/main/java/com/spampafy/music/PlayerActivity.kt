@@ -1,16 +1,24 @@
-
 package com.spampafy.music
 
 import android.content.ComponentName
+import android.content.res.ColorStateList
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.widget.*
+import android.view.View
+import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.SeekBar
+import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -36,6 +44,12 @@ class PlayerActivity : AppCompatActivity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
+    private val backgroundColor = Color.rgb(7, 11, 9)
+    private val cardColor = Color.rgb(17, 25, 20)
+    private val green = Color.rgb(57, 255, 120)
+    private val mutedGreen = Color.rgb(25, 75, 45)
+    private val secondaryText = Color.rgb(165, 180, 170)
+
     private val updateProgress = object : Runnable {
         override fun run() {
             updatePlayerInfo()
@@ -45,65 +59,112 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         createScreen()
         connectPlayer()
     }
 
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
+
+    private fun roundedBackground(
+        color: Int,
+        radius: Int = 16,
+        strokeColor: Int? = null
+    ): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = dp(radius).toFloat()
+            if (strokeColor != null) {
+                setStroke(dp(1), strokeColor)
+            }
+        }
+    }
+
+    private fun styleButton(
+        label: String,
+        background: Int,
+        textSize: Float = 15f
+    ): Button {
+        return Button(this).apply {
+            text = label
+            this.textSize = textSize
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            minHeight = 0
+            minimumHeight = 0
+            minWidth = 0
+            minimumWidth = 0
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            stateListAnimator = null
+            background = roundedBackground(background, 14)
+        }
+    }
+
     private fun createScreen() {
+        val scroll = ScrollView(this).apply {
+            fillViewport = true
+            isVerticalScrollBarEnabled = false
+            setBackgroundColor(backgroundColor)
+        }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(20), dp(18), dp(20), dp(28))
+            setBackgroundColor(backgroundColor)
+        }
+
+        val back = styleButton("‹  VOLVER", cardColor).apply {
+            textSize = 14f
+            setTextColor(green)
             gravity = Gravity.CENTER
-            setPadding(25, 30, 25, 30)
-            setBackgroundColor(Color.rgb(16, 16, 24))
+            background = roundedBackground(cardColor, 14, mutedGreen)
+            setOnClickListener { finish() }
         }
-
-        val back = Button(this).apply {
-            text = "← VOLVER"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(45, 35, 65))
-            setOnClickListener {
-                finish()
+        root.addView(
+            back,
+            LinearLayout.LayoutParams(-1, dp(48)).apply {
+                bottomMargin = dp(22)
             }
-        }
-
-        root.addView(back, LinearLayout.LayoutParams(-1, 50))
+        )
 
         val logo = TextView(this).apply {
-            text = "♫ SPAMPAFY"
+            text = "♫  SPAMPAFY"
             textSize = 25f
             gravity = Gravity.CENTER
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(167, 139, 250))
-            setPadding(0, 20, 0, 25)
+            setTextColor(green)
+            includeFontPadding = false
+            setPadding(0, dp(4), 0, dp(22))
         }
+        root.addView(logo, LinearLayout.LayoutParams(-1, -2))
 
-        root.addView(logo)
-
-        // Portada del álbum
         val coverContainer = FrameLayout(this).apply {
-            setBackgroundColor(Color.rgb(38, 30, 58))
+            background = roundedBackground(cardColor, 20, mutedGreen)
+            clipToOutline = true
         }
 
         coverImage = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            visibility = ImageView.GONE
+            visibility = View.GONE
         }
 
         coverPlaceholder = TextView(this).apply {
             text = "♫"
-            textSize = 115f
+            textSize = 112f
             gravity = Gravity.CENTER
-            setTextColor(Color.rgb(167, 139, 250))
-            setBackgroundColor(Color.rgb(38, 30, 58))
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(green)
+            background = roundedBackground(cardColor, 20)
         }
 
         coverContainer.addView(
             coverImage,
             FrameLayout.LayoutParams(-1, -1)
         )
-
         coverContainer.addView(
             coverPlaceholder,
             FrameLayout.LayoutParams(-1, -1)
@@ -111,78 +172,70 @@ class PlayerActivity : AppCompatActivity() {
 
         root.addView(
             coverContainer,
-            LinearLayout.LayoutParams(-1, 280)
+            LinearLayout.LayoutParams(-1, dp(280)).apply {
+                bottomMargin = dp(22)
+            }
         )
 
         title = TextView(this).apply {
             text = "Seleccioná una canción"
-            textSize = 22f
+            textSize = 21f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            setPadding(0, 25, 0, 5)
+            includeFontPadding = false
+            maxLines = 2
+            setPadding(dp(4), dp(4), dp(4), dp(7))
         }
-
-        root.addView(title)
+        root.addView(title, LinearLayout.LayoutParams(-1, -2))
 
         artist = TextView(this).apply {
             text = "Spampafy"
             textSize = 15f
             gravity = Gravity.CENTER
-            setTextColor(Color.LTGRAY)
+            setTextColor(secondaryText)
+            includeFontPadding = false
         }
-
-        root.addView(artist)
+        root.addView(
+            artist,
+            LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(18)
+            }
+        )
 
         progress = SeekBar(this).apply {
             max = 1000
-
-            progressTintList =
-                android.content.res.ColorStateList.valueOf(
-                    Color.rgb(167, 139, 250)
-                )
-
-            thumbTintList =
-                android.content.res.ColorStateList.valueOf(
-                    Color.WHITE
-                )
+            progressTintList = ColorStateList.valueOf(green)
+            progressBackgroundTintList = ColorStateList.valueOf(
+                Color.rgb(38, 48, 41)
+            )
+            thumbTintList = ColorStateList.valueOf(green)
 
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
-
                     override fun onProgressChanged(
                         seekBar: SeekBar?,
                         value: Int,
                         fromUser: Boolean
                     ) {
                         if (fromUser) {
-                            val duration =
-                                controller?.duration ?: 0L
-
+                            val duration = controller?.duration ?: 0L
                             if (duration > 0) {
-                                controller?.seekTo(
-                                    duration * value / 1000
-                                )
+                                controller?.seekTo(duration * value / 1000)
                             }
                         }
                     }
 
-                    override fun onStartTrackingTouch(
-                        seekBar: SeekBar?
-                    ) {}
-
-                    override fun onStopTrackingTouch(
-                        seekBar: SeekBar?
-                    ) {}
+                    override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                    override fun onStopTrackingTouch(seekBar: SeekBar?) {}
                 }
             )
         }
 
-        val progressParams =
-            LinearLayout.LayoutParams(-1, 45)
-
-        progressParams.topMargin = 20
-        root.addView(progress, progressParams)
+        root.addView(
+            progress,
+            LinearLayout.LayoutParams(-1, dp(42))
+        )
 
         val times = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -191,121 +244,106 @@ class PlayerActivity : AppCompatActivity() {
 
         currentTime = TextView(this).apply {
             text = "0:00"
-            setTextColor(Color.LTGRAY)
+            textSize = 12f
+            setTextColor(secondaryText)
         }
 
         totalTime = TextView(this).apply {
             text = "0:00"
+            textSize = 12f
             gravity = Gravity.END
-            setTextColor(Color.LTGRAY)
+            setTextColor(secondaryText)
         }
 
-        times.addView(
-            currentTime,
-            LinearLayout.LayoutParams(0, -2, 1f)
+        times.addView(currentTime, LinearLayout.LayoutParams(0, -2, 1f))
+        times.addView(totalTime, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(
+            times,
+            LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(24)
+            }
         )
-
-        times.addView(
-            totalTime,
-            LinearLayout.LayoutParams(0, -2, 1f)
-        )
-
-        root.addView(times)
 
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, 25, 0, 0)
         }
 
-        val previous = Button(this).apply {
-            text = "⏮"
-            textSize = 22f
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(45, 35, 65))
-            setOnClickListener {
-                controller?.seekToPreviousMediaItem()
-            }
+        val previous = styleButton("⏮", cardColor, 22f).apply {
+            setOnClickListener { controller?.seekToPreviousMediaItem() }
         }
 
-        playButton = Button(this).apply {
-            text = "▶"
-            textSize = 25f
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(109, 40, 217))
+        playButton = styleButton("▶", green, 25f).apply {
+            setTextColor(Color.rgb(4, 18, 9))
+            background = roundedBackground(green, 16)
             setOnClickListener {
                 val player = controller ?: return@setOnClickListener
-
-                if (player.isPlaying) {
-                    player.pause()
-                } else {
-                    player.play()
-                }
-
+                if (player.isPlaying) player.pause() else player.play()
                 updatePlayerInfo()
             }
         }
 
-        val next = Button(this).apply {
-            text = "⏭"
-            textSize = 22f
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(45, 35, 65))
-            setOnClickListener {
-                controller?.seekToNextMediaItem()
-            }
+        val next = styleButton("⏭", cardColor, 22f).apply {
+            setOnClickListener { controller?.seekToNextMediaItem() }
         }
 
         controls.addView(
             previous,
-            LinearLayout.LayoutParams(75, 60)
+            LinearLayout.LayoutParams(dp(72), dp(58)).apply {
+                marginEnd = dp(7)
+            }
         )
-
         controls.addView(
             playButton,
-            LinearLayout.LayoutParams(100, 65)
+            LinearLayout.LayoutParams(dp(94), dp(62)).apply {
+                marginStart = dp(3)
+                marginEnd = dp(3)
+            }
         )
-
         controls.addView(
             next,
-            LinearLayout.LayoutParams(75, 60)
+            LinearLayout.LayoutParams(dp(72), dp(58)).apply {
+                marginStart = dp(7)
+            }
         )
-
-        root.addView(controls)
+        root.addView(
+            controls,
+            LinearLayout.LayoutParams(-1, -2).apply {
+                bottomMargin = dp(24)
+            }
+        )
 
         val queueInfo = TextView(this).apply {
             text = "♫  Reproducción en cola"
             textSize = 14f
             gravity = Gravity.CENTER
-            setTextColor(Color.rgb(167, 139, 250))
-            setPadding(0, 30, 0, 0)
+            setTextColor(green)
+            includeFontPadding = false
+            setPadding(0, dp(5), 0, dp(12))
         }
+        root.addView(queueInfo, LinearLayout.LayoutParams(-1, -2))
 
-        root.addView(queueInfo)
-
-        setContentView(root)
+        scroll.addView(
+            root,
+            ScrollView.LayoutParams(-1, -2)
+        )
+        setContentView(scroll)
     }
 
     private fun connectPlayer() {
-
         val token = SessionToken(
             this,
             ComponentName(this, MusicService::class.java)
         )
 
-        val future = MediaController.Builder(
-            this,
-            token
-        ).buildAsync()
+        val future = MediaController.Builder(this, token).buildAsync()
 
         future.addListener({
-
             try {
                 controller = future.get()
 
                 controller?.addListener(
                     object : Player.Listener {
-
                         override fun onMediaItemTransition(
                             mediaItem: MediaItem?,
                             reason: Int
@@ -320,16 +358,13 @@ class PlayerActivity : AppCompatActivity() {
                             updatePlayerInfo()
                         }
 
-                        override fun onIsPlayingChanged(
-                            isPlaying: Boolean
-                        ) {
+                        override fun onIsPlayingChanged(isPlaying: Boolean) {
                             updatePlayerInfo()
                         }
                     }
                 )
 
                 updatePlayerInfo()
-
             } catch (e: Exception) {
                 Toast.makeText(
                     this,
@@ -337,62 +372,46 @@ class PlayerActivity : AppCompatActivity() {
                     Toast.LENGTH_SHORT
                 ).show()
             }
-
         }, ContextCompat.getMainExecutor(this))
     }
 
     private fun updatePlayerInfo() {
-
         val player = controller ?: return
-
         val metadata = player.mediaMetadata
 
-        title.text =
-            metadata.title?.toString()
-                ?: "Reproduciendo música"
-
-        artist.text =
-            metadata.artist?.toString()
-                ?: "Artista no disponible"
+        title.text = metadata.title?.toString() ?: "Reproduciendo música"
+        artist.text = metadata.artist?.toString() ?: "Artista no disponible"
 
         updateArtwork(metadata.artworkData)
 
-        playButton.text =
-            if (player.isPlaying) "Ⅱ" else "▶"
+        playButton.text = if (player.isPlaying) "Ⅱ" else "▶"
 
         val duration = player.duration
-            .takeIf {
-                it != androidx.media3.common.C.TIME_UNSET
-            } ?: 0L
+            .takeIf { it != androidx.media3.common.C.TIME_UNSET }
+            ?: 0L
 
         val position = player.currentPosition
 
-        progress.progress =
-            if (duration > 0) {
-                (position * 1000 / duration)
-                    .toInt()
-                    .coerceIn(0, 1000)
-            } else {
-                0
-            }
+        progress.progress = if (duration > 0) {
+            (position * 1000 / duration).toInt().coerceIn(0, 1000)
+        } else {
+            0
+        }
 
         currentTime.text = formatTime(position)
         totalTime.text = formatTime(duration)
     }
 
     private fun updateArtwork(artworkData: ByteArray?) {
-
         if (artworkData == null || artworkData.isEmpty()) {
             coverImage.setImageDrawable(null)
-            coverImage.visibility = ImageView.GONE
-            coverPlaceholder.visibility = TextView.VISIBLE
+            coverImage.visibility = View.GONE
+            coverPlaceholder.visibility = View.VISIBLE
             lastArtworkData = null
             return
         }
 
-        if (lastArtworkData?.contentEquals(artworkData) == true) {
-            return
-        }
+        if (lastArtworkData?.contentEquals(artworkData) == true) return
 
         try {
             val bitmap = BitmapFactory.decodeByteArray(
@@ -403,27 +422,25 @@ class PlayerActivity : AppCompatActivity() {
 
             if (bitmap != null) {
                 coverImage.setImageBitmap(bitmap)
-                coverImage.visibility = ImageView.VISIBLE
-                coverPlaceholder.visibility = TextView.GONE
+                coverImage.visibility = View.VISIBLE
+                coverPlaceholder.visibility = View.GONE
                 lastArtworkData = artworkData
             } else {
                 coverImage.setImageDrawable(null)
-                coverImage.visibility = ImageView.GONE
-                coverPlaceholder.visibility = TextView.VISIBLE
+                coverImage.visibility = View.GONE
+                coverPlaceholder.visibility = View.VISIBLE
                 lastArtworkData = artworkData
             }
-
         } catch (e: Exception) {
             coverImage.setImageDrawable(null)
-            coverImage.visibility = ImageView.GONE
-            coverPlaceholder.visibility = TextView.VISIBLE
+            coverImage.visibility = View.GONE
+            coverPlaceholder.visibility = View.VISIBLE
             lastArtworkData = artworkData
         }
     }
 
     private fun formatTime(milliseconds: Long): String {
         val seconds = (milliseconds / 1000).coerceAtLeast(0)
-
         return String.format(
             "%d:%02d",
             seconds / 60,
@@ -433,6 +450,7 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        handler.removeCallbacks(updateProgress)
         handler.post(updateProgress)
     }
 
@@ -442,6 +460,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(updateProgress)
         controller?.release()
         controller = null
         super.onDestroy()
