@@ -460,4 +460,275 @@ class MainActivity : AppCompatActivity() {
         val future = MediaController.Builder(this, token).buildAsync()
         controllerFuture = future
         future.addListener({
+
+            try {
+                controller = future.get()
+
+                controller?.addListener(object : Player.Listener {
+                    override fun onMediaItemTransition(
+                        mediaItem: MediaItem?,
+                        reason: Int
+                    ) {
+                        if (currentTab == "Inicio") showTab("Inicio")
+                    }
+                })
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this,
+                    "No se pudo conectar el reproductor",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun findTrack(uri: Uri): Track? {
+        return allTracks.firstOrNull {
+            it.uri.toString() == uri.toString()
+        }
+    }
+
+    private fun saveSelectedUris() {
+        val array = JSONArray()
+        selectedUris.forEach { array.put(it.toString()) }
+        prefs.edit().putString("selected_uris", array.toString()).apply()
+    }
+
+    private fun loadSelectedUris(): MutableList<Uri> {
+        val result = mutableListOf<Uri>()
+        try {
+            val array = JSONArray(
+                prefs.getString("selected_uris", "[]") ?: "[]"
+            )
+
+            for (i in 0 until array.length()) {
+                val uri = Uri.parse(array.getString(i))
+                try {
+                    contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                    result.add(uri)
+                } catch (_: Exception) {
+                    // Se omite si el permiso ya no está disponible.
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return result
+    }
+
+    private fun loadLibrary() {
+        val tracks = mutableListOf<Track>()
+
+        selectedUris.forEach { uri ->
+            try {
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(this, uri)
+
+                val title = retriever.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_TITLE
+                ) ?: getFileName(uri)
+
+                val artist = retriever.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_ARTIST
+                ) ?: "Artista desconocido"
+
+                val album = retriever.extractMetadata(
+                    MediaMetadataRetriever.METADATA_KEY_ALBUM
+                ) ?: "Álbum desconocido"
+
+                val artwork = retriever.embeddedPicture
+                retriever.release()
+
+                tracks.add(Track(uri, title, artist, album, artwork))
+            } catch (_: Exception) {
+            }
+        }
+
+        val convertedDir = File(
+            getExternalFilesDir(null),
+            "Spampafy/Converted"
+        )
+
+        if (convertedDir.exists()) {
+            convertedDir.listFiles()
+                ?.filter { it.isFile && it.extension.equals("opus", true) }
+                ?.forEach { file ->
+                    try {
+                        val uri = Uri.fromFile(file)
+                        if (tracks.none { it.uri == uri }) {
+                            val retriever = MediaMetadataRetriever()
+                            retriever.setDataSource(file.absolutePath)
+
+                            val title = retriever.extractMetadata(
+                                MediaMetadataRetriever.METADATA_KEY_TITLE
+                            ) ?: file.nameWithoutExtension
+
+                            val artist = retriever.extractMetadata(
+                                MediaMetadataRetriever.METADATA_KEY_ARTIST
+                            ) ?: "Artista desconocido"
+
+                            val album = retriever.extractMetadata(
+                                MediaMetadataRetriever.METADATA_KEY_ALBUM
+                            ) ?: "OPUS"
+
+                            val artwork = retriever.embeddedPicture
+                            retriever.release()
+
+                            tracks.add(
+                                Track(uri, title, artist, album, artwork)
+                            )
+                        }
+                    } catch (_: Exception) {
+                        tracks.add(
+                            Track(
+                                Uri.fromFile(file),
+                                file.nameWithoutExtension,
+                                "Artista desconocido",
+                                "OPUS"
+                            )
+                        )
+                    }
+                }
+        }
+
+        allTracks = tracks
+
+        if (::content.isInitialized) {
+            showTab(currentTab)
+        }
+    }
+
+    private fun getFileName(uri: Uri): String {
+        var name = "Audio"
+
+        try {
+            contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(
+                        OpenableColumns.DISPLAY_NAME
+                    )
+                    if (index >= 0) {
+                        name = cursor.getString(index) ?: name
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+
+        return name
+    }
+
+    private fun emptyMessage(message: String) {
+        addEmpty(content, message)
+    }
+
+    private fun addEmpty(parent: LinearLayout, message: String) {
+        parent.addView(TextView(this).apply {
+            text = message
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setTextColor(Color.LTGRAY)
+            setPadding(12, 25, 12, 25)
+        })
+    }
+
+    private fun showConverter() {
+        if (allTracks.isEmpty()) {
+            Toast.makeText(
+                this,
+                "Primero agregá música a tu biblioteca",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        val tracks = allTracks.toList()
+        val names = tracks.map { it.title }.toTypedArray()
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Elegir canción para convertir")
+            .setItems(names) { _, selected ->
+                val track = tracks[selected]
+                val bitrates = PcmToOpus.BITRATES
+                val labels = bitrates.map {
+                    "${it / 1000} kbps"
+                }.toTypedArray()
+
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Calidad OPUS")
+                    .setItems(labels) { _, quality ->
+                        convertTrack(track, bitrates[quality])
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun convertTrack(track: Track, bitrate: Int) {
+        val status = TextView(this).apply {
+            text = "Preparando conversión..."
+            textSize = 14f
+            setTextColor(Color.rgb(190, 150, 255))
+            setPadding(8, 12, 8, 12)
+        }
+
+        content.addView(status, 0)
+        conversionStatus = status
+
+        executor.execute {
+            try {
+                val converter = PcmToOpus(this)
+                val output = converter.convert(track.uri, bitrate) { message ->
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            status.text = message
+                        }
+                    }
+                }
+
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Conversión terminada: ${output.name}"
+                        Toast.makeText(
+                            this,
+                            "Archivo OPUS guardado correctamente",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        loadLibrary()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        status.text = "Error al convertir: ${e.message}"
+                        Toast.makeText(
+                            this,
+                            "No se pudo convertir el audio",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        controller?.release()
+        controller = null
+        controllerFuture = null
+        executor.shutdownNow()
+        super.onDestroy()
+    }
+}
+
       
