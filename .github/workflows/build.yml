@@ -53,9 +53,6 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-          echo "Keystore generado:"
-          ls -l "$KEYSTORE"
-
       - name: Obtener huella SHA-1
         run: |
           gradle :app:signingReport
@@ -69,7 +66,6 @@ jobs:
       - name: Inspeccionar biblioteca OPUS
         if: always()
         run: |
-          echo "Buscando biblioteca OPUS..."
           find "$HOME/.gradle/caches/modules-2/files-2.1/io.element.android/opusencoder/1.2.0" \
             -type f \( -name "*.aar" -o -name "*.jar" \) -print 2>/dev/null || true
 
