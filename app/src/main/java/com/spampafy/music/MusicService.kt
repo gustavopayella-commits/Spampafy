@@ -15,22 +15,22 @@ class MusicService : MediaSessionService() {
 
         player = ExoPlayer.Builder(this).build()
 
-        mediaSession = MediaSession.Builder(
-            this,
-            player!!
-        ).build()
+        player?.let {
+            EqualizerEngine.initialize(it.audioSessionId)
+        }
+
+        mediaSession = MediaSession.Builder(this, player!!).build()
     }
 
     override fun onGetSession(
         controllerInfo: MediaSession.ControllerInfo
-    ): MediaSession? {
-        return mediaSession
-    }
+    ): MediaSession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: android.content.Intent?) {
         val currentPlayer = player
 
-        if (currentPlayer == null || !currentPlayer.playWhenReady ||
+        if (currentPlayer == null ||
+            !currentPlayer.playWhenReady ||
             currentPlayer.mediaItemCount == 0
         ) {
             stopSelf()
@@ -38,6 +38,8 @@ class MusicService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        EqualizerEngine.release()
+
         mediaSession?.release()
         mediaSession = null
 
