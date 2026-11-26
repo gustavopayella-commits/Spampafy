@@ -1498,7 +1498,18 @@ class MainActivity : AppCompatActivity() {
         labels.addView(TextView(this).apply { text = track.title; textSize = 14f; typeface = Typeface.DEFAULT_BOLD; setTextColor(textMain); maxLines = 1 })
         labels.addView(TextView(this).apply { text = track.artist + if (track.folderName.isNotBlank()) " • ${track.folderName}" else ""; textSize = 11f; setTextColor(textSecondary); maxLines = 1; setPadding(0, 4, 0, 0) })
         row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
-        val play = TextView(this).apply { text = "▶"; gravity = Gravity.CENTER; setTextColor(Color.BLACK); background = roundedBackground(greenNeon, 24f); setPadding(10, 8, 10, 8); setOnClickListener { playTracks(allTracks.ifEmpty { listOf(track) }, (allTracks.ifEmpty { listOf(track) }).indexOf(track).coerceAtLeast(0) } }
+        val play = TextView(this).apply {
+            text = "▶"
+            gravity = Gravity.CENTER
+            setTextColor(Color.BLACK)
+            background = roundedBackground(greenNeon, 24f)
+            setPadding(10, 8, 10, 8)
+            setOnClickListener {
+                val playlist = allTracks.ifEmpty { listOf(track) }
+                val index = playlist.indexOf(track).coerceAtLeast(0)
+                playTracks(playlist, index)
+            }
+        }
         row.addView(play)
         val fav = TextView(this).apply {
             val set = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
@@ -1569,11 +1580,30 @@ class MainActivity : AppCompatActivity() {
         content.addView(conversionStatus)
         if (allTracks.isEmpty()) emptyMessage("Agregá canciones primero para convertirlas.")
         allTracks.forEach { track ->
-            val b = TextView(this).apply { text = "⇄  Convertir: ${track.title}"; setTextColor(textMain); setPadding(12, 12, 12, 12); background = roundedBackground(cardColor, 12f, greenBorder); setOnClickListener {
-                val bitrate = PcmToOpus.BITRATES.getOrElse(bitrateSpinner.selectedItemPosition) { 64000 }
-                conversionStatus?.text = "Convirtiendo ${track.title}..."
-                executor.execute { try { val output = PcmToOpus(this@MainActivity).convert(track.uri, bitrate) { status -> runOnUiThread { conversionStatus?.text = status } }; runOnUiThread { conversionStatus?.text = "Listo: ${output.name}"; Toast.makeText(this@MainActivity, "Archivo OPUS guardado", Toast.LENGTH_LONG).show(); loadLibrary() } } catch (e: Exception) { runOnUiThread { conversionStatus?.text = "Error: ${e.message}" } }
-            } }
+            val b = TextView(this).apply {
+                text = "⇄  Convertir: ${track.title}"
+                setTextColor(textMain)
+                setPadding(12, 12, 12, 12)
+                background = roundedBackground(cardColor, 12f, greenBorder)
+                setOnClickListener {
+                    val bitrate = PcmToOpus.BITRATES.getOrElse(bitrateSpinner.selectedItemPosition) { 64000 }
+                    conversionStatus?.text = "Convirtiendo ${track.title}..."
+                    executor.execute {
+                        try {
+                            val output = PcmToOpus(this@MainActivity).convert(track.uri, bitrate) { status ->
+                                runOnUiThread { conversionStatus?.text = status }
+                            }
+                            runOnUiThread {
+                                conversionStatus?.text = "Listo: ${output.name}"
+                                Toast.makeText(this@MainActivity, "Archivo OPUS guardado", Toast.LENGTH_LONG).show()
+                                loadLibrary()
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread { conversionStatus?.text = "Error: ${e.message}" }
+                        }
+                    }
+                }
+            }
             content.addView(b, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 })
         }
     }
