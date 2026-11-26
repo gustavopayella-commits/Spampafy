@@ -1,16 +1,13 @@
 package com.spampafy.music
 
 import android.content.ComponentName
-import android.content.res.ColorStateList
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -42,13 +39,13 @@ class PlayerActivity : AppCompatActivity() {
 
     private var lastArtworkData: ByteArray? = null
 
-    private val handler = Handler(Looper.getMainLooper())
-
-    private val backgroundColor = Color.rgb(7, 11, 9)
-    private val cardColor = Color.rgb(17, 25, 20)
+    private val backgroundColor = Color.rgb(7, 10, 8)
+    private val panelColor = Color.rgb(20, 27, 22)
     private val green = Color.rgb(57, 255, 120)
-    private val mutedGreen = Color.rgb(25, 75, 45)
-    private val secondaryText = Color.rgb(165, 180, 170)
+    private val darkGreen = Color.rgb(20, 105, 52)
+    private val textMuted = Color.rgb(165, 180, 170)
+
+    private val handler = Handler(Looper.getMainLooper())
 
     private val updateProgress = object : Runnable {
         override fun run() {
@@ -57,78 +54,51 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).toInt()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         createScreen()
         connectPlayer()
     }
 
-    private fun dp(value: Int): Int =
-        (value * resources.displayMetrics.density).toInt()
-
-    private fun roundedBackground(
-        color: Int,
-        radius: Int = 16,
-        strokeColor: Int? = null
-    ): GradientDrawable {
-        return GradientDrawable().apply {
-            setColor(color)
-            cornerRadius = dp(radius).toFloat()
-            if (strokeColor != null) {
-                setStroke(dp(1), strokeColor)
-            }
-        }
-    }
-
-    private fun styleButton(
-        label: String,
-        background: Int,
-        textSize: Float = 15f
-    ): Button {
-        return Button(this).apply {
-            text = label
-            this.textSize = textSize
-            isAllCaps = false
-            setTextColor(Color.WHITE)
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            minHeight = 0
-            minimumHeight = 0
-            minWidth = 0
-            minimumWidth = 0
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            stateListAnimator = null
-            background = roundedBackground(background, 14)
-        }
-    }
-
     private fun createScreen() {
-        val scroll = ScrollView(this).apply {
-            fillViewport = true
-            isVerticalScrollBarEnabled = false
-            setBackgroundColor(backgroundColor)
-        }
-
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(20), dp(18), dp(20), dp(28))
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            setPadding(dp(20), dp(18), dp(20), dp(24))
             setBackgroundColor(backgroundColor)
         }
 
-        val back = styleButton("‹  VOLVER", cardColor).apply {
+        val scroll = ScrollView(this)
+        scroll.setBackgroundColor(backgroundColor)
+        scroll.setFillViewport(true)
+        scroll.addView(
+            root,
+            android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        setContentView(scroll)
+
+        val back = Button(this).apply {
+            text = "←  VOLVER"
+            isAllCaps = false
             textSize = 14f
-            setTextColor(green)
-            gravity = Gravity.CENTER
-            background = roundedBackground(cardColor, 14, mutedGreen)
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            setBackgroundColor(panelColor)
             setOnClickListener { finish() }
         }
         root.addView(
             back,
-            LinearLayout.LayoutParams(-1, dp(48)).apply {
-                bottomMargin = dp(22)
-            }
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(50)
+            )
         )
 
         val logo = TextView(this).apply {
@@ -137,19 +107,25 @@ class PlayerActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(green)
-            includeFontPadding = false
-            setPadding(0, dp(4), 0, dp(22))
+            letterSpacing = 0.04f
+            setPadding(0, dp(18), 0, dp(20))
         }
-        root.addView(logo, LinearLayout.LayoutParams(-1, -2))
+        root.addView(
+            logo,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
 
+        // Portada del álbum
         val coverContainer = FrameLayout(this).apply {
-            background = roundedBackground(cardColor, 20, mutedGreen)
-            clipToOutline = true
+            setBackgroundColor(panelColor)
         }
 
         coverImage = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            visibility = View.GONE
+            visibility = ImageView.GONE
         }
 
         coverPlaceholder = TextView(this).apply {
@@ -158,22 +134,31 @@ class PlayerActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(green)
-            background = roundedBackground(cardColor, 20)
+            setBackgroundColor(panelColor)
         }
 
         coverContainer.addView(
             coverImage,
-            FrameLayout.LayoutParams(-1, -1)
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
         )
         coverContainer.addView(
             coverPlaceholder,
-            FrameLayout.LayoutParams(-1, -1)
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
         )
 
         root.addView(
             coverContainer,
-            LinearLayout.LayoutParams(-1, dp(280)).apply {
-                bottomMargin = dp(22)
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(280)
+            ).apply {
+                bottomMargin = dp(20)
             }
         )
 
@@ -183,33 +168,42 @@ class PlayerActivity : AppCompatActivity() {
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            includeFontPadding = false
             maxLines = 2
-            setPadding(dp(4), dp(4), dp(4), dp(7))
+            setPadding(dp(4), dp(4), dp(4), dp(5))
         }
-        root.addView(title, LinearLayout.LayoutParams(-1, -2))
+        root.addView(
+            title,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
 
         artist = TextView(this).apply {
             text = "Spampafy"
             textSize = 15f
             gravity = Gravity.CENTER
-            setTextColor(secondaryText)
-            includeFontPadding = false
+            setTextColor(textMuted)
+            maxLines = 1
         }
         root.addView(
             artist,
-            LinearLayout.LayoutParams(-1, -2).apply {
-                bottomMargin = dp(18)
-            }
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         )
 
         progress = SeekBar(this).apply {
             max = 1000
-            progressTintList = ColorStateList.valueOf(green)
-            progressBackgroundTintList = ColorStateList.valueOf(
-                Color.rgb(38, 48, 41)
-            )
-            thumbTintList = ColorStateList.valueOf(green)
+            progressTintList =
+                android.content.res.ColorStateList.valueOf(green)
+            thumbTintList =
+                android.content.res.ColorStateList.valueOf(green)
+            progressBackgroundTintList =
+                android.content.res.ColorStateList.valueOf(
+                    Color.rgb(54, 75, 60)
+                )
 
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
@@ -220,13 +214,14 @@ class PlayerActivity : AppCompatActivity() {
                     ) {
                         if (fromUser) {
                             val duration = controller?.duration ?: 0L
-                            if (duration > 0) {
+                            if (duration > 0L) {
                                 controller?.seekTo(duration * value / 1000)
                             }
                         }
                     }
 
                     override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+
                     override fun onStopTrackingTouch(seekBar: SeekBar?) {}
                 }
             )
@@ -234,7 +229,12 @@ class PlayerActivity : AppCompatActivity() {
 
         root.addView(
             progress,
-            LinearLayout.LayoutParams(-1, dp(42))
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(48)
+            ).apply {
+                topMargin = dp(15)
+            }
         )
 
         val times = LinearLayout(this).apply {
@@ -245,89 +245,115 @@ class PlayerActivity : AppCompatActivity() {
         currentTime = TextView(this).apply {
             text = "0:00"
             textSize = 12f
-            setTextColor(secondaryText)
+            setTextColor(textMuted)
         }
 
         totalTime = TextView(this).apply {
             text = "0:00"
             textSize = 12f
             gravity = Gravity.END
-            setTextColor(secondaryText)
+            setTextColor(textMuted)
         }
 
-        times.addView(currentTime, LinearLayout.LayoutParams(0, -2, 1f))
-        times.addView(totalTime, LinearLayout.LayoutParams(0, -2, 1f))
+        times.addView(
+            currentTime,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        times.addView(
+            totalTime,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        )
         root.addView(
             times,
-            LinearLayout.LayoutParams(-1, -2).apply {
-                bottomMargin = dp(24)
-            }
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         )
 
         val controls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
+            setPadding(0, dp(24), 0, dp(8))
         }
 
-        val previous = styleButton("⏮", cardColor, 22f).apply {
-            setOnClickListener { controller?.seekToPreviousMediaItem() }
+        val previous = Button(this).apply {
+            text = "⏮"
+            textSize = 22f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(panelColor)
+            setOnClickListener {
+                controller?.seekToPreviousMediaItem()
+            }
         }
 
-        playButton = styleButton("▶", green, 25f).apply {
-            setTextColor(Color.rgb(4, 18, 9))
-            background = roundedBackground(green, 16)
+        playButton = Button(this).apply {
+            text = "▶"
+            textSize = 25f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.BLACK)
+            setBackgroundColor(green)
             setOnClickListener {
                 val player = controller ?: return@setOnClickListener
-                if (player.isPlaying) player.pause() else player.play()
+                if (player.isPlaying) {
+                    player.pause()
+                } else {
+                    player.play()
+                }
                 updatePlayerInfo()
             }
         }
 
-        val next = styleButton("⏭", cardColor, 22f).apply {
-            setOnClickListener { controller?.seekToNextMediaItem() }
+        val next = Button(this).apply {
+            text = "⏭"
+            textSize = 22f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(panelColor)
+            setOnClickListener {
+                controller?.seekToNextMediaItem()
+            }
         }
 
         controls.addView(
             previous,
-            LinearLayout.LayoutParams(dp(72), dp(58)).apply {
-                marginEnd = dp(7)
+            LinearLayout.LayoutParams(dp(70), dp(58)).apply {
+                marginEnd = dp(10)
             }
         )
         controls.addView(
             playButton,
-            LinearLayout.LayoutParams(dp(94), dp(62)).apply {
-                marginStart = dp(3)
-                marginEnd = dp(3)
-            }
+            LinearLayout.LayoutParams(dp(94), dp(64))
         )
         controls.addView(
             next,
-            LinearLayout.LayoutParams(dp(72), dp(58)).apply {
-                marginStart = dp(7)
+            LinearLayout.LayoutParams(dp(70), dp(58)).apply {
+                marginStart = dp(10)
             }
         )
         root.addView(
             controls,
-            LinearLayout.LayoutParams(-1, -2).apply {
-                bottomMargin = dp(24)
-            }
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         )
 
         val queueInfo = TextView(this).apply {
-            text = "♫  Reproducción en cola"
-            textSize = 14f
+            text = "♫  REPRODUCCIÓN EN COLA"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            letterSpacing = 0.08f
             gravity = Gravity.CENTER
             setTextColor(green)
-            includeFontPadding = false
-            setPadding(0, dp(5), 0, dp(12))
+            setPadding(0, dp(25), 0, dp(8))
         }
-        root.addView(queueInfo, LinearLayout.LayoutParams(-1, -2))
-
-        scroll.addView(
-            root,
-            ScrollView.LayoutParams(-1, -2)
+        root.addView(
+            queueInfo,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
         )
-        setContentView(scroll)
     }
 
     private fun connectPlayer() {
@@ -336,7 +362,10 @@ class PlayerActivity : AppCompatActivity() {
             ComponentName(this, MusicService::class.java)
         )
 
-        val future = MediaController.Builder(this, token).buildAsync()
+        val future = MediaController.Builder(
+            this,
+            token
+        ).buildAsync()
 
         future.addListener({
             try {
@@ -392,7 +421,7 @@ class PlayerActivity : AppCompatActivity() {
 
         val position = player.currentPosition
 
-        progress.progress = if (duration > 0) {
+        progress.progress = if (duration > 0L) {
             (position * 1000 / duration).toInt().coerceIn(0, 1000)
         } else {
             0
@@ -405,13 +434,15 @@ class PlayerActivity : AppCompatActivity() {
     private fun updateArtwork(artworkData: ByteArray?) {
         if (artworkData == null || artworkData.isEmpty()) {
             coverImage.setImageDrawable(null)
-            coverImage.visibility = View.GONE
-            coverPlaceholder.visibility = View.VISIBLE
+            coverImage.visibility = ImageView.GONE
+            coverPlaceholder.visibility = TextView.VISIBLE
             lastArtworkData = null
             return
         }
 
-        if (lastArtworkData?.contentEquals(artworkData) == true) return
+        if (lastArtworkData?.contentEquals(artworkData) == true) {
+            return
+        }
 
         try {
             val bitmap = BitmapFactory.decodeByteArray(
@@ -422,19 +453,18 @@ class PlayerActivity : AppCompatActivity() {
 
             if (bitmap != null) {
                 coverImage.setImageBitmap(bitmap)
-                coverImage.visibility = View.VISIBLE
-                coverPlaceholder.visibility = View.GONE
-                lastArtworkData = artworkData
+                coverImage.visibility = ImageView.VISIBLE
+                coverPlaceholder.visibility = TextView.GONE
             } else {
                 coverImage.setImageDrawable(null)
-                coverImage.visibility = View.GONE
-                coverPlaceholder.visibility = View.VISIBLE
-                lastArtworkData = artworkData
+                coverImage.visibility = ImageView.GONE
+                coverPlaceholder.visibility = TextView.VISIBLE
             }
+            lastArtworkData = artworkData
         } catch (e: Exception) {
             coverImage.setImageDrawable(null)
-            coverImage.visibility = View.GONE
-            coverPlaceholder.visibility = View.VISIBLE
+            coverImage.visibility = ImageView.GONE
+            coverPlaceholder.visibility = TextView.VISIBLE
             lastArtworkData = artworkData
         }
     }
