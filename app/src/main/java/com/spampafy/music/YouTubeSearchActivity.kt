@@ -22,11 +22,12 @@ class YouTubeSearchActivity : Activity() {
     private val green = Color.rgb(0, 255, 120)
     private val black = Color.rgb(8, 8, 8)
     private val executor = Executors.newSingleThreadExecutor()
+    private val imageExecutor = Executors.newFixedThreadPool(3)
 
-    private lateinit var container: LinearLayout
     private lateinit var results: LinearLayout
     private lateinit var searchInput: EditText
     private lateinit var status: TextView
+    private lateinit var filters: LinearLayout
 
     private var filter = "all"
 
@@ -74,10 +75,12 @@ class YouTubeSearchActivity : Activity() {
             setHintTextColor(Color.GRAY)
             setTextColor(Color.WHITE)
             textSize = 15f
-            singleLine = true
+            setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT
             setPadding(16, 12, 16, 12)
-            background = background(Color.rgb(28, 28, 28), 24f)
+            background = this@YouTubeSearchActivity.background(
+                Color.rgb(28, 28, 28), 24f
+            )
         }
 
         val searchButton = Button(this).apply {
@@ -93,17 +96,23 @@ class YouTubeSearchActivity : Activity() {
         val searchRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(searchInput, LinearLayout.LayoutParams(0, 54, 1f))
-            addView(searchButton, LinearLayout.LayoutParams(
-                105, 54
-            ).apply {
-                leftMargin = 8
-            })
+
+            addView(
+                searchInput,
+                LinearLayout.LayoutParams(0, 54, 1f)
+            )
+
+            addView(
+                searchButton,
+                LinearLayout.LayoutParams(105, 54).apply {
+                    leftMargin = 8
+                }
+            )
         }
 
         root.addView(searchRow)
 
-        val filters = LinearLayout(this).apply {
+        filters = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(0, 15, 0, 15)
@@ -118,24 +127,27 @@ class YouTubeSearchActivity : Activity() {
         )
 
         options.forEach { (label, value) ->
+
             val button = TextView(this).apply {
                 text = label
                 textSize = 11f
                 gravity = Gravity.CENTER
-                setTextColor(if (filter == value) green else Color.WHITE)
+                setTextColor(
+                    if (filter == value) green else Color.WHITE
+                )
                 setPadding(9, 10, 9, 10)
+
                 setOnClickListener {
                     filter = value
-                    options.forEach { }
-                    search(searchInput.text.toString())
-                    for (i in 0 until filters.childCount) {
-                        val child = filters.getChildAt(i) as TextView
-                        child.setTextColor(
-                            if (child.text == label) green else Color.WHITE
-                        )
+                    updateFilters()
+
+                    val query = searchInput.text.toString()
+                    if (query.isNotBlank()) {
+                        search(query)
                     }
                 }
             }
+
             filters.addView(button)
         }
 
@@ -151,20 +163,25 @@ class YouTubeSearchActivity : Activity() {
         root.addView(status)
 
         val scroll = ScrollView(this)
+
         results = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
 
         scroll.addView(results)
-        root.addView(scroll, LinearLayout.LayoutParams(
-            -1, 0, 1f
-        ))
+
+        root.addView(
+            scroll,
+            LinearLayout.LayoutParams(-1, 0, 1f)
+        )
 
         val back = Button(this).apply {
             text = "VOLVER A SPAMPAFY"
             setTextColor(green)
             setBackgroundColor(Color.TRANSPARENT)
-            setOnClickListener { finish() }
+            setOnClickListener {
+                finish()
+            }
         }
 
         root.addView(back)
@@ -172,7 +189,21 @@ class YouTubeSearchActivity : Activity() {
         setContentView(root)
     }
 
+    private fun updateFilters() {
+        val options = listOf(
+            "all", "video", "shorts", "music", "live"
+        )
+
+        for (i in 0 until filters.childCount) {
+            val child = filters.getChildAt(i) as TextView
+            child.setTextColor(
+                if (filter == options[i]) green else Color.WHITE
+            )
+        }
+    }
+
     private fun search(query: String) {
+
         if (query.isBlank()) {
             status.text = "Escribí qué querés escuchar"
             return
@@ -189,16 +220,11 @@ class YouTubeSearchActivity : Activity() {
         results.removeAllViews()
 
         executor.execute {
+
+            var connection: HttpURLConnection? = null
+
             try {
                 val encoded = URLEncoder.encode(query, "UTF-8")
-
-                val type = when (filter) {
-                    "video" -> "video"
-                    "shorts" -> "video"
-                    "music" -> "video"
-                    "live" -> "video"
-                    else -> "video"
-                }
 
                 val extra = when (filter) {
                     "music" -> "&videoCategoryId=10"
@@ -208,30 +234,46 @@ class YouTubeSearchActivity : Activity() {
 
                 val url = URL(
                     "https://www.googleapis.com/youtube/v3/search" +
-                    "?part=snippet&type=$type&maxResults=20" +
+                    "?part=snippet&type=video&maxResults=20" +
                     "&q=$encoded$extra&key=$apiKey"
                 )
 
-                val connection = url.openConnection() as HttpURLConnection
+                connection = url.openConnection() as HttpURLConnection
+                connection.requestMethod = "GET"
                 connection.connectTimeout = 15000
                 connection.readTimeout = 15000
 
-                val response = connection.inputStream.bufferedReader().use {
+                val responseCode = connection.responseCode
+
+                val stream = if (responseCode in 200..299) {
+                    connection.inputStream
+                } else {
+                    connection.errorStream
+                }
+
+                val response = stream.bufferedReader().use {
                     it.readText()
                 }
 
-                connection.disconnect()
+                if (responseCode !in 200..299) {
+                    val message = try {
+                        JSONObject(response)
+                            .getJSONObject("error")
+                            .optString("message")
+                    } catch (_: Exception) {
+                        "Error de YouTube API"
+                    }
+
+                    runOnUiThread {
+                        status.text = "Error API: $message"
+                    }
+                    return@execute
+                }
 
                 val json = JSONObject(response)
                 val items = json.getJSONArray("items")
 
-                runOnUiThread {
-                    if (items.length() == 0) {
-                        status.text = "No se encontraron resultados"
-                    } else {
-                        status.text = "${items.length()} resultados encontrados"
-                    }
-                }
+                val found = mutableListOf<Array<String>>()
 
                 for (i in 0 until items.length()) {
                     val item = items.getJSONObject(i)
@@ -243,19 +285,52 @@ class YouTubeSearchActivity : Activity() {
                     val snippet = item.getJSONObject("snippet")
                     val title = snippet.optString("title")
                     val channel = snippet.optString("channelTitle")
-                    val thumbnails = snippet.optJSONObject("thumbnails")
-                    val medium = thumbnails?.optJSONObject("medium")
+
+                    val thumbnails =
+                        snippet.optJSONObject("thumbnails")
+
+                    val medium =
+                        thumbnails?.optJSONObject("medium")
+
                     val imageUrl = medium?.optString("url") ?: ""
 
-                    runOnUiThread {
-                        addResult(videoId, title, channel, imageUrl)
+                    found.add(
+                        arrayOf(videoId, title, channel, imageUrl)
+                    )
+                }
+
+                runOnUiThread {
+
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+
+                    results.removeAllViews()
+
+                    if (found.isEmpty()) {
+                        status.text = "No se encontraron resultados"
+                    } else {
+                        status.text =
+                            "${found.size} resultados encontrados"
+
+                        found.forEach { item ->
+                            addResult(
+                                item[0],
+                                item[1],
+                                item[2],
+                                item[3]
+                            )
+                        }
                     }
                 }
 
             } catch (e: Exception) {
                 runOnUiThread {
-                    status.text = "Error al buscar. Revisá tu conexión y API."
+                    if (!isFinishing && !isDestroyed) {
+                        status.text =
+                            "Error al buscar. Revisá tu conexión y API."
+                    }
                 }
+            } finally {
+                connection?.disconnect()
             }
         }
     }
@@ -266,11 +341,15 @@ class YouTubeSearchActivity : Activity() {
         channel: String,
         imageUrl: String
     ) {
+
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(8, 10, 8, 10)
-            background = background(Color.rgb(22, 22, 22), 16f)
+
+            background = this@YouTubeSearchActivity.background(
+                Color.rgb(22, 22, 22), 16f
+            )
         }
 
         val image = ImageView(this).apply {
@@ -278,18 +357,25 @@ class YouTubeSearchActivity : Activity() {
             setBackgroundColor(Color.DKGRAY)
         }
 
-        row.addView(image, LinearLayout.LayoutParams(115, 78))
+        row.addView(
+            image,
+            LinearLayout.LayoutParams(115, 78)
+        )
 
         if (imageUrl.isNotBlank()) {
-            executor.execute {
+            imageExecutor.execute {
                 try {
                     val bitmap = URL(imageUrl).openStream().use {
                         BitmapFactory.decodeStream(it)
                     }
+
                     runOnUiThread {
-                        image.setImageBitmap(bitmap)
+                        if (!isFinishing && !isDestroyed) {
+                            image.setImageBitmap(bitmap)
+                        }
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
         }
 
@@ -318,6 +404,7 @@ class YouTubeSearchActivity : Activity() {
             textSize = 11f
             setTextColor(green)
             typeface = Typeface.DEFAULT_BOLD
+
             setOnClickListener {
                 openPlayer(videoId, title, channel)
             }
@@ -327,9 +414,10 @@ class YouTubeSearchActivity : Activity() {
         details.addView(artist)
         details.addView(play)
 
-        row.addView(details, LinearLayout.LayoutParams(
-            0, -2, 1f
-        ))
+        row.addView(
+            details,
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
 
         row.setOnClickListener {
             openPlayer(videoId, title, channel)
@@ -337,6 +425,7 @@ class YouTubeSearchActivity : Activity() {
 
         val params = LinearLayout.LayoutParams(-1, -2)
         params.bottomMargin = 9
+
         results.addView(row, params)
     }
 
@@ -349,14 +438,17 @@ class YouTubeSearchActivity : Activity() {
             this,
             YouTubePlayerActivity::class.java
         )
+
         intent.putExtra("VIDEO_ID", videoId)
         intent.putExtra("VIDEO_TITLE", title)
         intent.putExtra("VIDEO_CHANNEL", channel)
+
         startActivity(intent)
     }
 
     override fun onDestroy() {
         executor.shutdownNow()
+        imageExecutor.shutdownNow()
         super.onDestroy()
     }
 }
