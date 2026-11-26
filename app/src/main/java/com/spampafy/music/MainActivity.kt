@@ -1,3 +1,4 @@
+
 package com.spampafy.music
 
 import android.Manifest
@@ -350,9 +351,16 @@ class MainActivity : AppCompatActivity() {
         actionButton("＋  Agregar música") {
             chooseAudio.launch(arrayOf("audio/*"))
         }
+
         actionButton("▶  Reproducir toda mi música") {
             playTracks(allTracks, 0)
         }
+
+        // NUEVO: acceso independiente a YouTube.
+        actionButton("▶  YouTube  •  Videos y música") {
+            startActivity(Intent(this, YouTubeSearchActivity::class.java))
+        }
+
         actionButton("♫  Cola de reproducción") {
             showQueue()
         }
