@@ -1382,6 +1382,202 @@ class MainActivity : AppCompatActivity() {
             )
         }
     }
+    // ================= FUNCIONES RECUPERADAS =================
+
+    private fun connectPlayer() {
+        val token = SessionToken(this, ComponentName(this, MusicService::class.java))
+        val future = MediaController.Builder(this, token).buildAsync()
+        controllerFuture = future
+        future.addListener({
+            try {
+                controller = future.get()
+                controller?.addListener(object : Player.Listener {
+                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                        if (currentTab == "Inicio") showTab("Inicio")
+                    }
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (currentTab == "Inicio") showTab("Inicio")
+                    }
+                })
+            } catch (e: Exception) {
+                Toast.makeText(this, "No se pudo conectar el reproductor", Toast.LENGTH_SHORT).show()
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun saveSelectedUris() {
+        prefs.edit().putString("selected_uris", JSONArray(selectedUris.map { it.toString() }).toString()).apply()
+    }
+
+    private fun loadSelectedUris(): MutableList<Uri> {
+        val json = prefs.getString("selected_uris", "[]") ?: "[]"
+        return try { val arr = JSONArray(json); MutableList(arr.length()) { Uri.parse(arr.getString(it)) } } catch (_: Exception) { mutableListOf() }
+    }
+
+    private fun saveSelectedFolders() {
+        val arr = JSONArray()
+        selectedFolders.forEach { arr.put(JSONObject().put("uri", it.uri.toString()).put("name", it.name)) }
+        prefs.edit().putString("selected_folders", arr.toString()).apply()
+    }
+
+    private fun loadSelectedFolders(): MutableList<MusicFolder> {
+        val json = prefs.getString("selected_folders", "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(json)
+            MutableList(arr.length()) { i -> val obj = arr.getJSONObject(i); MusicFolder(Uri.parse(obj.getString("uri")), obj.optString("name", "Carpeta")) }
+        } catch (_: Exception) { mutableListOf() }
+    }
+
+    private fun loadLibrary() {
+        executor.execute {
+            val tracks = LinkedHashMap<String, Track>()
+            val folders = mutableMapOf<String, MutableList<Track>>()
+            selectedUris.forEach { uri -> runCatching { makeTrack(uri, "") }.getOrNull()?.let { tracks[it.key()] = it } }
+            selectedFolders.forEach { folder ->
+                val list = mutableListOf<Track>()
+                runCatching { scanFolder(DocumentFile.fromTreeUri(this, folder.uri), folder.name, list) }
+                list.forEach { tracks[it.key()] = it }
+                folders[folder.uri.toString()] = list
+            }
+            runOnUiThread {
+                allTracks = tracks.values.toMutableList()
+                folderTracks = folders
+                if (currentTab == "Inicio" || currentTab == "Biblioteca" || currentTab == "Favoritos") showTab(currentTab)
+            }
+        }
+    }
+
+    private fun scanFolder(dir: DocumentFile?, folderName: String, out: MutableList<Track>) {
+        if (dir == null || !dir.isDirectory) return
+        dir.listFiles().forEach { file ->
+            if (file.isDirectory) scanFolder(file, folderName, out)
+            else if (file.isFile && (file.type?.startsWith("audio/") == true || file.name?.matches(Regex("(?i).*\\.(mp3|m4a|aac|wav|flac|ogg|opus|wma)$")) == true)) {
+                runCatching { makeTrack(file.uri, folderName) }.getOrNull()?.let(out::add)
+            }
+        }
+    }
+
+    private fun makeTrack(uri: Uri, folder: String): Track? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(this, uri)
+            val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                ?: queryDisplayName(uri)?.substringBeforeLast('.') ?: "Audio"
+            val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) ?: "Artista desconocido"
+            val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM) ?: "Álbum desconocido"
+            val art = retriever.embeddedPicture
+            Track(uri, title, artist, album, art, folder)
+        } catch (_: Exception) { null } finally { runCatching { retriever.release() } }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return runCatching {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull()
+    }
+
+    private fun findTrack(uri: Uri): Track? = allTracks.firstOrNull { it.uri.toString() == uri.toString() } ?: makeTrack(uri, "")
+
+    private fun playTracks(tracks: List<Track>, startIndex: Int) {
+        if (tracks.isEmpty()) { Toast.makeText(this, "No hay canciones para reproducir", Toast.LENGTH_SHORT).show(); return }
+        val c = controller
+        if (c == null) { Toast.makeText(this, "El reproductor todavía está iniciando", Toast.LENGTH_SHORT).show(); return }
+        c.setMediaItems(tracks.map { it.mediaItem() }, startIndex.coerceIn(0, tracks.lastIndex), 0L)
+        c.prepare()
+        c.play()
+        Toast.makeText(this, "Reproduciendo ${tracks[startIndex.coerceIn(0, tracks.lastIndex)].title}", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun addTrackRow(track: Track, target: LinearLayout = content) {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(12, 10, 8, 10); background = roundedBackground(cardColor, 14f, greenBorder) }
+        val icon = TextView(this).apply { text = "♫"; textSize = 25f; gravity = Gravity.CENTER; setTextColor(greenNeon) }
+        row.addView(icon, LinearLayout.LayoutParams(40, 48))
+        val labels = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(8, 0, 5, 0) }
+        labels.addView(TextView(this).apply { text = track.title; textSize = 14f; typeface = Typeface.DEFAULT_BOLD; setTextColor(textMain); maxLines = 1 })
+        labels.addView(TextView(this).apply { text = track.artist + if (track.folderName.isNotBlank()) " • ${track.folderName}" else ""; textSize = 11f; setTextColor(textSecondary); maxLines = 1; setPadding(0, 4, 0, 0) })
+        row.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+        val play = TextView(this).apply { text = "▶"; gravity = Gravity.CENTER; setTextColor(Color.BLACK); background = roundedBackground(greenNeon, 24f); setPadding(10, 8, 10, 8); setOnClickListener { playTracks(allTracks.ifEmpty { listOf(track) }, (allTracks.ifEmpty { listOf(track) }).indexOf(track).coerceAtLeast(0) } }
+        row.addView(play)
+        val fav = TextView(this).apply {
+            val set = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
+            text = if (set.contains(track.key())) "♥" else "♡"; textSize = 22f; gravity = Gravity.CENTER; setTextColor(Color.RED); setPadding(8, 5, 5, 5)
+            setOnClickListener { val f = (prefs.getStringSet("favorites", emptySet()) ?: emptySet()).toMutableSet(); if (!f.add(track.key())) f.remove(track.key()); prefs.edit().putStringSet("favorites", f).apply(); text = if (f.contains(track.key())) "♥" else "♡" }
+        }
+        row.addView(fav)
+        target.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 7 })
+    }
+
+    private fun emptyMessage(message: String) = addEmpty(content, message)
+    private fun addEmpty(target: LinearLayout, message: String) {
+        target.addView(TextView(this).apply { text = message; textSize = 14f; gravity = Gravity.CENTER; setTextColor(textSecondary); setPadding(20, 24, 20, 24) }, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    private fun showQueue() {
+        content.removeAllViews(); heading("Cola de reproducción"); subtitle("Canciones cargadas en el reproductor")
+        actionButton("← Volver") { showTab("Inicio") }
+        val c = controller
+        val queue = if (c != null) (0 until c.mediaItemCount).mapNotNull { i ->
+            val item = c.getMediaItemAt(i); val md = item.mediaMetadata
+            Track(item.localConfiguration?.uri ?: return@mapNotNull null, md.title?.toString() ?: "Audio", md.artist?.toString() ?: "Artista desconocido", md.albumTitle?.toString() ?: "", folderName = "")
+        } else emptyList()
+        if (queue.isEmpty()) emptyMessage("La cola está vacía. Elegí una canción para reproducir.") else queue.forEach { addTrackRow(it, content) }
+    }
+
+    private fun getPlaylists(): List<Pair<String, MutableList<Track>>> {
+        val raw = prefs.getString("playlists", "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i); val name = o.optString("name", "Lista")
+                val uris = o.optJSONArray("uris") ?: JSONArray()
+                val tracks = (0 until uris.length()).mapNotNull { findTrack(Uri.parse(uris.getString(it))) }.toMutableList()
+                name to tracks
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    private fun createPlaylistDialog() {
+        val input = EditText(this).apply { hint = "Nombre de la lista"; setTextColor(textMain); setHintTextColor(textSecondary) }
+        androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Nueva lista de reproducción").setView(input)
+            .setNegativeButton("Cancelar", null).setPositiveButton("Crear") { _, _ ->
+                val name = input.text.toString().trim(); if (name.isBlank()) return@setPositiveButton
+                val arr = JSONArray(prefs.getString("playlists", "[]") ?: "[]")
+                arr.put(JSONObject().put("name", name).put("uris", JSONArray()))
+                prefs.edit().putString("playlists", arr.toString()).apply(); showTab("Biblioteca")
+            }.show()
+    }
+
+    private fun showPlaylist(name: String, tracks: List<Track>) {
+        content.removeAllViews(); heading(name); subtitle("${tracks.size} canciones")
+        actionButton("← Volver a biblioteca") { showTab("Biblioteca") }
+        actionButton("▶ Reproducir lista") { playTracks(tracks, 0) }
+        if (tracks.isEmpty()) emptyMessage("Esta lista está vacía.") else tracks.forEach { addTrackRow(it, content) }
+        actionButton("Eliminar lista") {
+            val arr = JSONArray(); getPlaylists().filterNot { it.first == name }.forEach { (n, ts) -> arr.put(JSONObject().put("name", n).put("uris", JSONArray(ts.map { it.uri.toString() }))) }
+            prefs.edit().putString("playlists", arr.toString()).apply(); showTab("Biblioteca")
+        }
+    }
+
+    private fun showConverter() {
+        content.removeAllViews(); heading("Convertir a OPUS"); subtitle("Conversión de audio local. Seleccioná un archivo de tu biblioteca.")
+        actionButton("← Volver") { showTab("Biblioteca") }
+        val bitrateSpinner = Spinner(this).apply { adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, PcmToOpus.BITRATES.map { "${it / 1000} kbps" }) }
+        content.addView(bitrateSpinner, LinearLayout.LayoutParams(-1, 48))
+        conversionStatus = TextView(this).apply { text = "Los archivos convertidos se guardan en la carpeta Spampafy/Converted."; setTextColor(textSecondary); setPadding(8, 10, 8, 10) }
+        content.addView(conversionStatus)
+        if (allTracks.isEmpty()) emptyMessage("Agregá canciones primero para convertirlas.")
+        allTracks.forEach { track ->
+            val b = TextView(this).apply { text = "⇄  Convertir: ${track.title}"; setTextColor(textMain); setPadding(12, 12, 12, 12); background = roundedBackground(cardColor, 12f, greenBorder); setOnClickListener {
+                val bitrate = PcmToOpus.BITRATES.getOrElse(bitrateSpinner.selectedItemPosition) { 64000 }
+                conversionStatus?.text = "Convirtiendo ${track.title}..."
+                executor.execute { try { val output = PcmToOpus(this@MainActivity).convert(track.uri, bitrate) { status -> runOnUiThread { conversionStatus?.text = status } }; runOnUiThread { conversionStatus?.text = "Listo: ${output.name}"; Toast.makeText(this@MainActivity, "Archivo OPUS guardado", Toast.LENGTH_LONG).show(); loadLibrary() } } catch (e: Exception) { runOnUiThread { conversionStatus?.text = "Error: ${e.message}" } }
+            } }
+            content.addView(b, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 })
+        }
+    }
+
     private fun actionButton(
         label: String,
         action: () -> Unit
